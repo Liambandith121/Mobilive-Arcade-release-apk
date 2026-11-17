@@ -97,6 +97,17 @@ gradle :app:testDebugUnitTest
 
 If opening locally in **Android Studio**, select **File > Open**, choose the repository root, let Gradle sync, and run the `app` configuration on an emulator or physical Android device (API 24+).
 
+### 4. Automated Debug APK & GitHub Releases (GitHub Actions)
+
+The workflow at `.github/workflows/android-debug-release.yml` automates testing, debug APK building, and GitHub Release publishing:
+
+- **Triggers**: Pushes to `main` / `master`, version tags (`v*`), pull requests, and manual `workflow_dispatch`.
+- **Steps**:
+  1. Verifies `agp = "9.1.1"` in `gradle/libs.versions.toml` and sets up **JDK 17** and **Gradle 9.3.1**.
+  2. Accepts Android SDK licenses and decodes `debug.keystore.base64` into `debug.keystore` so the APK signing matches Firebase OAuth fingerprints.
+  3. Runs `gradle :app:testDebugUnitTest` and `gradle :app:assembleDebug`.
+  4. Uploads `app/build/outputs/apk/debug/app-debug.apk` as a workflow artifact and publishes a **GitHub Release** with the debug APK attached (`v*` tags publish standard releases; branch/manual runs publish `debug-build-<run_number>` prereleases).
+
 ---
 
 ## Firebase & Security Rules Setup
