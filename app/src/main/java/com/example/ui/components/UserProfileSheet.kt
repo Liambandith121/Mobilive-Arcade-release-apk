@@ -3,7 +3,9 @@ package com.example.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -45,6 +47,7 @@ fun UserProfileBottomSheet(
             actionLabel = actionLabel,
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp)
         )
@@ -105,8 +108,7 @@ fun UserProfileCard(
         Surface(
             shape = RoundedCornerShape(50),
             color = ObsidianSurfaceElevated,
-            border = BorderStroke(1.dp, ObsidianOutline),
-            modifier = Modifier.testTag("user_profile_join_date")
+            border = BorderStroke(1.dp, ObsidianOutline)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -122,7 +124,8 @@ fun UserProfileCard(
                 Text(
                     text = "Joined ${profile.formattedJoinDate()}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = GoldCoin
+                    color = GoldCoin,
+                    modifier = Modifier.testTag("user_profile_join_date")
                 )
             }
         }
