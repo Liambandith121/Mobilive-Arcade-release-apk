@@ -34,8 +34,6 @@ class ArcadeViewModel(
     private val _selectedStreamId = MutableStateFlow<String?>(null)
     private val _selectedConversationId = MutableStateFlow<String?>(null)
     private val _selectedPostForComments = MutableStateFlow<SocialPost?>(null)
-    private val _inspectedUserId = MutableStateFlow<String?>(null)
-    val inspectedUserId: StateFlow<String?> = _inspectedUserId.asStateFlow()
 
     private fun <T> Flow<T>.toUiState(label: String): StateFlow<UiState<T>> =
         map<T, UiState<T>> { UiState.Success(it) }
@@ -122,15 +120,6 @@ class ArcadeViewModel(
 
     val postForComments: StateFlow<SocialPost?> = _selectedPostForComments.asStateFlow()
 
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val inspectedProfile: StateFlow<UiState<UserProfile?>> =
-        _inspectedUserId
-            .flatMapLatest { uid ->
-                if (uid.isNullOrBlank()) flowOf(null)
-                else repository.observePublicProfile(uid)
-            }
-            .toUiState("user profile")
-
     init {
         viewModelScope.launch {
             val firebaseUser = Firebase.auth.currentUser
@@ -168,10 +157,6 @@ class ArcadeViewModel(
 
     fun openPostComments(post: SocialPost?) {
         _selectedPostForComments.value = post
-    }
-
-    fun inspectUserProfile(userId: String?) {
-        _inspectedUserId.value = userId
     }
 
     fun detectLocalLanIp(): String = "${repository.detectLocalIpv4Address()}:19132"

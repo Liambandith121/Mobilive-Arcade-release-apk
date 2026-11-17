@@ -47,8 +47,7 @@ fun ProfileScreen(
     streamsState: UiState<List<LiveStream>>,
     postsState: UiState<List<SocialPost>>,
     allProfilesState: UiState<List<UserProfile>>,
-    openSettingsInitially: Boolean = false,
-    onInspectProfile: () -> Unit = {}
+    openSettingsInitially: Boolean = false
 ) {
     val context = LocalContext.current
     val credentialManager = remember(context) { CredentialManager.create(context) }
@@ -79,12 +78,6 @@ fun ProfileScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = ObsidianBg),
                 title = { Text("Arcade Profile & Rewards", style = MaterialTheme.typography.titleLarge) },
                 actions = {
-                    IconButton(
-                        onClick = onInspectProfile,
-                        modifier = Modifier.testTag("view_user_profile_button")
-                    ) {
-                        Icon(Icons.Rounded.Badge, contentDescription = "View User Profile Card", tint = GoldCoin)
-                    }
                     IconButton(
                         onClick = { showEditProfileDialog = true },
                         modifier = Modifier.testTag("edit_profile_button")
@@ -133,10 +126,7 @@ fun ProfileScreen(
 
                     is UiState.Success -> {
                         Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp))
-                                .clickable { onInspectProfile() },
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(24.dp),
                             color = ObsidianSurface,
                             border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.45f))

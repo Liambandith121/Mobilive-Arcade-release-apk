@@ -4,8 +4,4 @@
     <string name="lan_joining_instruction">Joining: press Join here, then open Minecraft &gt; Play &gt; Worlds and tap the world.</string>
     <string name="sign_in_google">Sign in with Google</string>
     <string name="sign_up_arcade">Create Arcade Account</string>
-    <string name="user_profile_title">User Profile</string>
-    <string name="joined_date_format">Joined %1$s</string>
-    <string name="profile_loading">Loading profile from Firestore…</string>
-    <string name="profile_not_found">User profile not found</string>
 </resources>

@@ -124,8 +124,6 @@ fun MobiliveArcadeApp(currentUserId: String) {
     val postForComments by viewModel.postForComments.collectAsStateWithLifecycle()
     val commentsState by viewModel.selectedPostComments.collectAsStateWithLifecycle()
     val levelUpBanner by viewModel.levelUpBanner.collectAsStateWithLifecycle()
-    val inspectedUserId by viewModel.inspectedUserId.collectAsStateWithLifecycle()
-    val inspectedProfileState by viewModel.inspectedProfile.collectAsStateWithLifecycle()
 
     val userPrivate = (userPrivateState as? UiState.Success)?.data
     val myProfile = (myProfileState as? UiState.Success)?.data
@@ -153,9 +151,6 @@ fun MobiliveArcadeApp(currentUserId: String) {
         }
     }
 
-    if (inspectedUserId != null) {
-        BackHandler { viewModel.inspectUserProfile(null) }
-    }
     if (selectedStreamId != null && currentRoute == ArcadeRoutes.WATCH) {
         BackHandler { selectedStreamId = null }
     }
@@ -174,7 +169,7 @@ fun MobiliveArcadeApp(currentUserId: String) {
             containerColor = ObsidianBg,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             bottomBar = {
-                if (!useRail && inspectedUserId == null && selectedStreamId == null && selectedConversationId == null) {
+                if (!useRail && selectedStreamId == null && selectedConversationId == null) {
                     NavigationBar(
                         containerColor = ObsidianSurface,
                         windowInsets = WindowInsets.navigationBars
@@ -314,8 +309,7 @@ fun MobiliveArcadeApp(currentUserId: String) {
                                 conversationsState = conversationsState,
                                 communitiesState = communitiesState,
                                 selectedConversationId = selectedConversationId,
-                                onSelectConversation = { selectedConversationId = it },
-                                onOpenUserProfile = { uid -> viewModel.inspectUserProfile(uid) }
+                                onSelectConversation = { selectedConversationId = it }
                             )
                         }
 
@@ -328,39 +322,9 @@ fun MobiliveArcadeApp(currentUserId: String) {
                                 streamsState = streamsState,
                                 postsState = postsState,
                                 allProfilesState = allProfilesState,
-                                openSettingsInitially = openProfileSettings,
-                                onInspectProfile = { viewModel.inspectUserProfile(currentUserId) }
+                                openSettingsInitially = openProfileSettings
                             )
                         }
-                    }
-
-                    if (inspectedUserId != null) {
-                        val isOwn = inspectedUserId == currentUserId
-                        val followingIds = userPrivate?.followingUserIds.orEmpty()
-                        UserProfileScreen(
-                            profileState = if (isOwn) myProfileState else inspectedProfileState,
-                            isOwnProfile = isOwn,
-                            isFollowing = inspectedUserId in followingIds,
-                            onBack = { viewModel.inspectUserProfile(null) },
-                            onToggleFollow = { target -> viewModel.toggleFollow(target) },
-                            onMessage = { target ->
-                                viewModel.createConversation(
-                                    title = target.displayName,
-                                    groupChat = false,
-                                    participants = listOf(target)
-                                ) { convId ->
-                                    viewModel.inspectUserProfile(null)
-                                    selectedConversationId = convId
-                                    navigateTab(ArcadeRoutes.SOCIAL)
-                                }
-                            },
-                            onEditProfile = if (isOwn) {
-                                {
-                                    viewModel.inspectUserProfile(null)
-                                    navigateTab(ArcadeRoutes.PROFILE)
-                                }
-                            } else null
-                        )
                     }
                 }
             }

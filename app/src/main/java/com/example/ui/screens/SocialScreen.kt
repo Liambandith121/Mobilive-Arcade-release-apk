@@ -37,8 +37,7 @@ fun SocialScreen(
     conversationsState: UiState<List<Conversation>>,
     communitiesState: UiState<List<GameCommunity>>,
     selectedConversationId: String?,
-    onSelectConversation: (String?) -> Unit,
-    onOpenUserProfile: (String) -> Unit = {}
+    onSelectConversation: (String?) -> Unit
 ) {
     val blockedIds = userPrivate?.blockedUserIds.orEmpty()
     val followingIds = userPrivate?.followingUserIds.orEmpty()
@@ -229,7 +228,6 @@ fun SocialScreen(
                                         profile = friend,
                                         isFriend = true,
                                         isFollowing = friend.userId in followingIds,
-                                        onOpenProfile = { onOpenUserProfile(friend.userId) },
                                         onFollow = { viewModel.toggleFollow(friend) },
                                         onAddOrMessage = {
                                             viewModel.createConversation(
@@ -262,7 +260,6 @@ fun SocialScreen(
                                         profile = player,
                                         isFriend = false,
                                         isFollowing = player.userId in followingIds,
-                                        onOpenProfile = { onOpenUserProfile(player.userId) },
                                         onFollow = { viewModel.toggleFollow(player) },
                                         onAddOrMessage = { viewModel.sendFriendRequest(player) },
                                         onReport = { reportingTarget = player.userId to player.handle },
@@ -332,7 +329,6 @@ private fun PlayerSocialRow(
     profile: UserProfile,
     isFriend: Boolean,
     isFollowing: Boolean,
-    onOpenProfile: () -> Unit,
     onFollow: () -> Unit,
     onAddOrMessage: () -> Unit,
     onReport: () -> Unit,
@@ -340,10 +336,7 @@ private fun PlayerSocialRow(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onOpenProfile() },
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = ObsidianSurface,
         border = BorderStroke(1.dp, ObsidianOutline)
@@ -375,7 +368,6 @@ private fun PlayerSocialRow(
                     Icon(Icons.Rounded.MoreVert, contentDescription = "More", tint = TextMuted)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(text = { Text("View User Profile") }, onClick = { menuOpen = false; onOpenProfile() })
                     DropdownMenuItem(text = { Text("Report User") }, onClick = { menuOpen = false; onReport() })
                     DropdownMenuItem(text = { Text("Block User", color = CoralLive) }, onClick = { menuOpen = false; onBlock() })
                 }
