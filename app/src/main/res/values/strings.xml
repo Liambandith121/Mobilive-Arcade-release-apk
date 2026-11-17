@@ -4,4 +4,5 @@
     <string name="lan_joining_instruction">Joining: press Join here, then open Minecraft &gt; Play &gt; Worlds and tap the world.</string>
     <string name="sign_in_google">Sign in with Google</string>
     <string name="sign_up_arcade">Create Arcade Account</string>
+    <string name="default_web_client_id">YOUR_GOOGLE_OAUTH_WEB_CLIENT_ID</string>
 </resources>
