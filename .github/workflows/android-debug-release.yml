@@ -50,6 +50,13 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
+      - name: Ensure Gradle Wrapper exists
+        run: |
+          if [ ! -f ./gradlew ]; then
+            gradle wrapper --gradle-version 9.3.1 --no-daemon
+          fi
+          chmod +x ./gradlew
+
       - name: Decode debug keystore
         run: |
           if [ -f debug.keystore.base64 ]; then
@@ -67,7 +74,7 @@ jobs:
           fi
 
       - name: Run unit tests
-        run: gradle :app:testDebugUnitTest --no-daemon
+        run: ./gradlew app:testDebugUnitTest --stacktrace
 
       - name: Upload unit test report
         if: always()
