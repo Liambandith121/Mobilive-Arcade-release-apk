@@ -1,0 +1,385 @@
+{
+  "entities": {
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Private user account, wallet coins, XP level, daily streak, buffs, and privacy settings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "coins": { "type": "integer" },
+        "xp": { "type": "integer" },
+        "level": { "type": "integer" },
+        "streakDays": { "type": "integer" },
+        "lastClaimDayIndex": { "type": "integer" },
+        "activeBuffs": { "type": "array" },
+        "privacyDmPolicy": { "type": "string", "enum": ["everyone", "friends", "nobody"] },
+        "privacyShowOnline": { "type": "boolean" },
+        "privacyLanVisible": { "type": "boolean" },
+        "autoSaveReplays": { "type": "boolean" },
+        "blockedUserIds": { "type": "array" },
+        "followingUserIds": { "type": "array" },
+        "joinedCommunityIds": { "type": "array" },
+        "claimedAchievementIds": { "type": "array" },
+        "lastDailyClaimAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "coins", "xp", "level", "streakDays", "lastClaimDayIndex", "activeBuffs", "privacyDmPolicy", "privacyShowOnline", "privacyLanVisible", "autoSaveReplays", "blockedUserIds", "followingUserIds", "joinedCommunityIds", "claimedAchievementIds", "createdAt", "updatedAt"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Public gamer profile without PII.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "handle": { "type": "string" },
+        "displayName": { "type": "string" },
+        "bio": { "type": "string" },
+        "avatarStyle": { "type": "string" },
+        "avatarPhotoUri": { "type": "string" },
+        "level": { "type": "integer" },
+        "xp": { "type": "integer" },
+        "followersCount": { "type": "integer" },
+        "followingCount": { "type": "integer" },
+        "verifiedBadge": { "type": "boolean" },
+        "liveNow": { "type": "boolean" },
+        "searchable": { "type": "boolean" },
+        "currentGame": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "handle", "displayName", "bio", "avatarStyle", "avatarPhotoUri", "level", "xp", "followersCount", "followingCount", "verifiedBadge", "liveNow", "searchable", "currentGame", "createdAt", "updatedAt"]
+    },
+    "GalleryMedia": {
+      "title": "GalleryMedia",
+      "description": "User uploaded videos, screenshots, and highlights.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["screenshot", "video", "highlight"] },
+        "gameTitle": { "type": "string" },
+        "mediaUri": { "type": "string" },
+        "durationSec": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "mediaType", "gameTitle", "mediaUri", "durationSec", "createdAt", "updatedAt"]
+    },
+    "UserNotification": {
+      "title": "UserNotification",
+      "description": "User notification entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "notifType": { "type": "string", "enum": ["friend_request", "live", "reward", "tournament", "comment", "system"] },
+        "readFlag": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "body", "notifType", "readFlag", "createdAt", "updatedAt"]
+    },
+    "SocialPost": {
+      "title": "SocialPost",
+      "description": "Public post, story, or short video clip.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorHandle": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "authorVerified": { "type": "boolean" },
+        "postType": { "type": "string", "enum": ["POST", "STORY", "SHORT"] },
+        "visibility": { "type": "string", "enum": ["public", "friends"] },
+        "gameTag": { "type": "string" },
+        "caption": { "type": "string" },
+        "mediaUri": { "type": "string" },
+        "likesCount": { "type": "integer" },
+        "commentsCount": { "type": "integer" },
+        "sharesCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "authorHandle", "authorAvatar", "authorVerified", "postType", "visibility", "gameTag", "caption", "mediaUri", "likesCount", "commentsCount", "sharesCount", "createdAt", "updatedAt"]
+    },
+    "PostComment": {
+      "title": "PostComment",
+      "description": "Comment on a social post or short.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "authorId", "authorName", "text", "createdAt", "updatedAt"]
+    },
+    "PostLike": {
+      "title": "PostLike",
+      "description": "Like marker on a social post.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "userId", "createdAt"]
+    },
+    "LiveStream": {
+      "title": "LiveStream",
+      "description": "Live game broadcast and recorded replay.",
+      "type": "object",
+      "properties": {
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "hostHandle": { "type": "string" },
+        "hostAvatar": { "type": "string" },
+        "title": { "type": "string" },
+        "gameTitle": { "type": "string" },
+        "streamStatus": { "type": "string", "enum": ["live", "replay", "ended"] },
+        "viewerCount": { "type": "integer" },
+        "peakViewers": { "type": "integer" },
+        "totalGiftsCoins": { "type": "integer" },
+        "slowModeSec": { "type": "integer" },
+        "micEnabled": { "type": "boolean" },
+        "recordReplay": { "type": "boolean" },
+        "durationSec": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hostId", "hostName", "hostHandle", "hostAvatar", "title", "gameTitle", "streamStatus", "viewerCount", "peakViewers", "totalGiftsCoins", "slowModeSec", "micEnabled", "recordReplay", "durationSec", "createdAt", "updatedAt"]
+    },
+    "StreamChatMessage": {
+      "title": "StreamChatMessage",
+      "description": "Real-time chat or gift coin message in a live stream.",
+      "type": "object",
+      "properties": {
+        "streamId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "text": { "type": "string" },
+        "messageType": { "type": "string", "enum": ["chat", "gift", "pinned"] },
+        "giftCoins": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["streamId", "authorId", "authorName", "text", "messageType", "giftCoins", "createdAt"]
+    },
+    "MultiplayerWorld": {
+      "title": "MultiplayerWorld",
+      "description": "LAN / Multiplayer world room for hosting and joining.",
+      "type": "object",
+      "properties": {
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "hostAvatar": { "type": "string" },
+        "worldName": { "type": "string" },
+        "gameName": { "type": "string" },
+        "gameMode": { "type": "string", "enum": ["Survival", "Creative", "Adventure", "Minigame"] },
+        "lanAddress": { "type": "string" },
+        "lanVisible": { "type": "boolean" },
+        "multiplayerOn": { "type": "boolean" },
+        "worldStatus": { "type": "string", "enum": ["open", "in_game", "closed"] },
+        "maxPlayers": { "type": "integer" },
+        "participantIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hostId", "hostName", "hostAvatar", "worldName", "gameName", "gameMode", "lanAddress", "lanVisible", "multiplayerOn", "worldStatus", "maxPlayers", "participantIds", "createdAt", "updatedAt"]
+    },
+    "PartyRoom": {
+      "title": "PartyRoom",
+      "description": "Multiplayer party with voice chat and matchmaking queue.",
+      "type": "object",
+      "properties": {
+        "leaderId": { "type": "string" },
+        "leaderName": { "type": "string" },
+        "partyName": { "type": "string" },
+        "gameTitle": { "type": "string" },
+        "maxSlots": { "type": "integer" },
+        "memberIds": { "type": "array" },
+        "mutedMemberIds": { "type": "array" },
+        "voiceActive": { "type": "boolean" },
+        "queueState": { "type": "string", "enum": ["idle", "searching", "matched"] },
+        "partyStatus": { "type": "string", "enum": ["active", "closed"] },
+        "matchedLobbyCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["leaderId", "leaderName", "partyName", "gameTitle", "maxSlots", "memberIds", "mutedMemberIds", "voiceActive", "queueState", "partyStatus", "matchedLobbyCode", "createdAt", "updatedAt"]
+    },
+    "GameCommunity": {
+      "title": "GameCommunity",
+      "description": "Game-specific community hub.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "name": { "type": "string" },
+        "gameCategory": { "type": "string" },
+        "description": { "type": "string" },
+        "badgeColor": { "type": "string" },
+        "openCommunity": { "type": "boolean" },
+        "memberCount": { "type": "integer" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["creatorId", "name", "gameCategory", "description", "badgeColor", "openCommunity", "memberCount", "memberIds", "createdAt", "updatedAt"]
+    },
+    "Tournament": {
+      "title": "Tournament",
+      "description": "Competitive gaming tournament.",
+      "type": "object",
+      "properties": {
+        "organizerId": { "type": "string" },
+        "title": { "type": "string" },
+        "gameTitle": { "type": "string" },
+        "prizeCoins": { "type": "integer" },
+        "entryCoins": { "type": "integer" },
+        "maxTeams": { "type": "integer" },
+        "tournamentState": { "type": "string", "enum": ["upcoming", "active", "completed"] },
+        "registeredIds": { "type": "array" },
+        "scheduleLabel": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["organizerId", "title", "gameTitle", "prizeCoins", "entryCoins", "maxTeams", "tournamentState", "registeredIds", "scheduleLabel", "createdAt", "updatedAt"]
+    },
+    "FriendRequest": {
+      "title": "FriendRequest",
+      "description": "Friend request or accepted friendship between two users.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderAvatar": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "receiverName": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "senderAvatar", "receiverId", "receiverName", "participantIds", "status", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct message or group chat conversation.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "groupChat": { "type": "boolean" },
+        "participantIds": { "type": "array" },
+        "participantLabels": { "type": "array" },
+        "lastMessage": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "groupChat", "participantIds", "participantLabels", "lastMessage", "createdBy", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Message inside a direct or group conversation.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "senderId", "senderName", "text", "participantIds", "createdAt"]
+    },
+    "UserReport": {
+      "title": "UserReport",
+      "description": "Moderation report submitted by a user.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetHandle": { "type": "string" },
+        "reason": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string", "enum": ["submitted"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetUserId", "targetHandle", "reason", "details", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Private user settings, progression, and PII."
+    },
+    "/public_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Public gamer profiles."
+    },
+    "/users/{userId}/gallery/{mediaId}": {
+      "schema": { "$ref": "#/entities/GalleryMedia" },
+      "description": "User's personal videos, screenshots, and highlights gallery."
+    },
+    "/users/{userId}/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/UserNotification" },
+      "description": "User notifications."
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/SocialPost" },
+      "description": "Public posts, stories, and shorts."
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/PostComment" },
+      "description": "Comments on posts and shorts."
+    },
+    "/posts/{postId}/likes/{likeUserId}": {
+      "schema": { "$ref": "#/entities/PostLike" },
+      "description": "Post likes."
+    },
+    "/streams/{streamId}": {
+      "schema": { "$ref": "#/entities/LiveStream" },
+      "description": "Live streams and replays."
+    },
+    "/streams/{streamId}/chat/{msgId}": {
+      "schema": { "$ref": "#/entities/StreamChatMessage" },
+      "description": "Live stream chat and gift messages."
+    },
+    "/worlds/{worldId}": {
+      "schema": { "$ref": "#/entities/MultiplayerWorld" },
+      "description": "LAN and multiplayer game worlds."
+    },
+    "/parties/{partyId}": {
+      "schema": { "$ref": "#/entities/PartyRoom" },
+      "description": "Multiplayer parties with voice chat and matchmaking."
+    },
+    "/communities/{communityId}": {
+      "schema": { "$ref": "#/entities/GameCommunity" },
+      "description": "Game communities."
+    },
+    "/tournaments/{tournamentId}": {
+      "schema": { "$ref": "#/entities/Tournament" },
+      "description": "Esports tournaments."
+    },
+    "/friend_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/FriendRequest" },
+      "description": "Friend requests and friendships."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Direct messages and group chats."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages in a conversation."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/UserReport" },
+      "description": "Moderation reports."
+    }
+  }
+}
