@@ -8,6 +8,7 @@
 
 - **Authentication & Gamer Profile**
   - Google Sign-In & Sign-Up onboarding via Jetpack `CredentialManager` (`GetSignInWithGoogleOption` + startup auto sign-in).
+  - Real-time `UserProfile` screen (`UserProfileScreen`) fetched from Cloud Firestore displaying display name, avatar, join date (`createdAt`), bio, main game, level/XP progress, and follow/message actions.
   - Customizable **Avatar (Profile Face)** presets or personal photo via the zero-permission Android Photo Picker (`PickVisualMedia`).
   - **Verified Creator Badge**, bio, favorite game, follower/following counts, and live status ring.
 - **Home, Feed, Stories & Shorts**
@@ -132,7 +133,7 @@ FIRESTORE_EMULATOR_HOST="127.0.0.1:8085" node --test firestore.test.js
 │       │   └── ui/
 │       │       ├── auth/AuthScreen.kt    # Credential Manager Google Sign-In & Sign-Up
 │       │       ├── components/           # Shared arcade UI components
-│       │       ├── screens/              # Home, Watch, Play, Social, Profile screens
+│       │       ├── screens/              # Home, Watch, Play, Social, Profile, UserProfile screens
 │       │       ├── theme/                # Material 3 Neon Obsidian theme & local fonts
 │       │       └── viewmodel/            # ArcadeViewModel state flows
 │       └── res/                          # Adaptive launcher icon, drawables, fonts, strings
