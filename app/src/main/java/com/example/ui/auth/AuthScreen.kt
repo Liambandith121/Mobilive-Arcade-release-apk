@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.util.Log
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -25,10 +24,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -43,6 +42,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -57,6 +57,8 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
+        withFrameNanos { }
+        delay(300L)
         attemptAutoSignIn(
             context = context,
             credentialManager = credentialManager,
@@ -71,8 +73,8 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
             .fillMaxSize()
             .background(ObsidianBg)
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.img_hero_arcade),
+        AsyncImage(
+            model = R.drawable.img_hero_arcade,
             contentDescription = "Mobilive Arcade arena backdrop",
             modifier = Modifier
                 .fillMaxWidth()

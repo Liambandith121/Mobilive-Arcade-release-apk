@@ -5,7 +5,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -27,7 +26,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,10 +41,10 @@ import com.example.ui.viewmodel.ArcadeViewModel
 fun HomeScreen(
     viewModel: ArcadeViewModel,
     userPrivate: UserPrivate?,
-    myProfile: PublicProfile?,
+    myProfile: UserProfile?,
     postsState: UiState<List<SocialPost>>,
     streamsState: UiState<List<LiveStream>>,
-    profilesState: UiState<List<PublicProfile>>,
+    profilesState: UiState<List<UserProfile>>,
     worldsState: UiState<List<MultiplayerWorld>>,
     notificationsState: UiState<List<UserNotification>>,
     onNavigateWatch: () -> Unit,
@@ -71,6 +69,7 @@ fun HomeScreen(
     var showNotificationsSheet by remember { mutableStateOf(false) }
     var viewingStory by remember { mutableStateOf<SocialPost?>(null) }
     var reportingTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var selectedUserProfile by remember { mutableStateOf<UserProfile?>(null) }
 
     Scaffold(
         containerColor = ObsidianBg,
@@ -410,6 +409,10 @@ fun HomeScreen(
                 showSearchSheet = false
                 onOpenStream(streamId)
             },
+            onInspectProfile = { target ->
+                showSearchSheet = false
+                selectedUserProfile = target
+            },
             onSendFriendRequest = { target -> viewModel.sendFriendRequest(target) },
             onFollow = { target -> viewModel.toggleFollow(target) }
         )
@@ -433,6 +436,23 @@ fun HomeScreen(
             }
         )
     }
+
+    if (selectedUserProfile != null) {
+        val target = selectedUserProfile!!
+        val followingIds = userPrivate?.followingUserIds.orEmpty()
+        UserProfileBottomSheet(
+            profile = target,
+            isOwnProfile = target.userId == viewModel.currentUserId,
+            isFollowing = target.userId in followingIds,
+            onDismiss = { selectedUserProfile = null },
+            onToggleFollow = { viewModel.toggleFollow(target) },
+            onMessageOrAdd = {
+                selectedUserProfile = null
+                viewModel.sendFriendRequest(target)
+            },
+            actionLabel = "Add Friend"
+        )
+    }
 }
 
 @Composable
@@ -454,10 +474,8 @@ private fun HeroArcadeBanner(
         border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.45f))
     ) {
         Box(modifier = Modifier.height(178.dp)) {
-            Image(
-                painter = painterResource(
-                    id = if (featured != null) R.drawable.img_stream_voxel else R.drawable.img_hero_arcade
-                ),
+            AsyncImage(
+                model = if (featured != null) R.drawable.img_stream_voxel else R.drawable.img_hero_arcade,
                 contentDescription = "Featured live arcade stream",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
@@ -794,14 +812,15 @@ fun CreatePostDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchModalSheet(
-    profiles: List<PublicProfile>,
+    profiles: List<UserProfile>,
     streams: List<LiveStream>,
     worlds: List<MultiplayerWorld>,
     posts: List<SocialPost>,
     onDismiss: () -> Unit,
     onSelectStream: (String) -> Unit,
-    onSendFriendRequest: (PublicProfile) -> Unit,
-    onFollow: (PublicProfile) -> Unit
+    onInspectProfile: (UserProfile) -> Unit,
+    onSendFriendRequest: (UserProfile) -> Unit,
+    onFollow: (UserProfile) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = ObsidianSurface) {
@@ -853,7 +872,8 @@ private fun SearchModalSheet(
                     item { Text("Players", style = MaterialTheme.typography.labelMedium, color = CyanNeon) }
                     items(matchedProfiles, key = { "p_${it.userId}" }) { p ->
                         ListItem(
-                            leadingContent = { AvatarFace(avatarStyle = p.avatarStyle, size = 36.dp) },
+                            modifier = Modifier.clickable { onInspectProfile(p) },
+                            leadingContent = { AvatarFace(avatarStyle = p.avatarStyle, photoUri = p.avatarPhotoUri, size = 36.dp) },
                             headlineContent = { Text(p.displayName) },
                             supportingContent = { Text("@${p.handle} • LV ${p.level}") },
                             trailingContent = {

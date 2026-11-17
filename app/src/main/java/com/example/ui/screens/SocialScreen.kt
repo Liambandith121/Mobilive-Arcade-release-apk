@@ -58,6 +58,7 @@ fun SocialScreen(
     var selectedTab by remember { mutableIntStateOf(0) } // 0=Messages, 1=Friends & Discover, 2=Communities
     var showNewChatDialog by remember { mutableStateOf(false) }
     var reportingTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var selectedUserProfile by remember { mutableStateOf<UserProfile?>(null) }
 
     LaunchedEffect(selectedConversationId) {
         viewModel.selectConversation(selectedConversationId)
@@ -228,6 +229,7 @@ fun SocialScreen(
                                         profile = friend,
                                         isFriend = true,
                                         isFollowing = friend.userId in followingIds,
+                                        onViewProfile = { selectedUserProfile = friend },
                                         onFollow = { viewModel.toggleFollow(friend) },
                                         onAddOrMessage = {
                                             viewModel.createConversation(
@@ -260,6 +262,7 @@ fun SocialScreen(
                                         profile = player,
                                         isFriend = false,
                                         isFollowing = player.userId in followingIds,
+                                        onViewProfile = { selectedUserProfile = player },
                                         onFollow = { viewModel.toggleFollow(player) },
                                         onAddOrMessage = { viewModel.sendFriendRequest(player) },
                                         onReport = { reportingTarget = player.userId to player.handle },
@@ -322,6 +325,31 @@ fun SocialScreen(
             }
         )
     }
+
+    if (selectedUserProfile != null) {
+        val target = selectedUserProfile!!
+        val isFriend = target.userId in friendIds
+        UserProfileBottomSheet(
+            profile = target,
+            isOwnProfile = target.userId == viewModel.currentUserId,
+            isFollowing = target.userId in followingIds,
+            onDismiss = { selectedUserProfile = null },
+            onToggleFollow = { viewModel.toggleFollow(target) },
+            onMessageOrAdd = {
+                selectedUserProfile = null
+                if (isFriend) {
+                    viewModel.createConversation(
+                        title = target.displayName,
+                        groupChat = false,
+                        participants = listOf(target)
+                    ) { convId -> onSelectConversation(convId) }
+                } else {
+                    viewModel.sendFriendRequest(target)
+                }
+            },
+            actionLabel = if (isFriend) "Message" else "Add Friend"
+        )
+    }
 }
 
 @Composable
@@ -329,6 +357,7 @@ private fun PlayerSocialRow(
     profile: UserProfile,
     isFriend: Boolean,
     isFollowing: Boolean,
+    onViewProfile: () -> Unit,
     onFollow: () -> Unit,
     onAddOrMessage: () -> Unit,
     onReport: () -> Unit,
@@ -336,7 +365,10 @@ private fun PlayerSocialRow(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onViewProfile() },
         shape = RoundedCornerShape(16.dp),
         color = ObsidianSurface,
         border = BorderStroke(1.dp, ObsidianOutline)
@@ -368,6 +400,7 @@ private fun PlayerSocialRow(
                     Icon(Icons.Rounded.MoreVert, contentDescription = "More", tint = TextMuted)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("View Profile") }, onClick = { menuOpen = false; onViewProfile() })
                     DropdownMenuItem(text = { Text("Report User") }, onClick = { menuOpen = false; onReport() })
                     DropdownMenuItem(text = { Text("Block User", color = CoralLive) }, onClick = { menuOpen = false; onBlock() })
                 }

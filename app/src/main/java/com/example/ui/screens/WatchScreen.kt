@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,7 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -315,8 +313,8 @@ private fun StreamCard(
     ) {
         Column {
             Box(modifier = Modifier.fillMaxWidth().height(165.dp)) {
-                Image(
-                    painter = painterResource(id = R.drawable.img_stream_voxel),
+                AsyncImage(
+                    model = R.drawable.img_stream_voxel,
                     contentDescription = stream.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -400,8 +398,8 @@ private fun ShortReelCard(
                     contentScale = ContentScale.Crop
                 )
             } else {
-                Image(
-                    painter = painterResource(id = R.drawable.img_hero_arcade),
+                AsyncImage(
+                    model = R.drawable.img_hero_arcade,
                     contentDescription = shortPost.caption,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -533,8 +531,8 @@ private fun StreamPlayerView(
                     .clip(RoundedCornerShape(20.dp))
                     .background(ObsidianSurface)
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.img_stream_voxel),
+                AsyncImage(
+                    model = R.drawable.img_stream_voxel,
                     contentDescription = "Stream video feed",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
