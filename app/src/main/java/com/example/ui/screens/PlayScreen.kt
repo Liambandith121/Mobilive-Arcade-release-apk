@@ -47,10 +47,10 @@ fun PlayScreen(
     onShowMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val worlds = (worldsState as? UiState.Success)?.data.orEmpty()
-    val parties = (partiesState as? UiState.Success)?.data.orEmpty()
-    val communities = (communitiesState as? UiState.Success)?.data.orEmpty()
-    val tournaments = (tournamentsState as? UiState.Success)?.data.orEmpty()
+    val worlds = remember(worldsState) { (worldsState as? UiState.Success)?.data.orEmpty() }
+    val parties = remember(partiesState) { (partiesState as? UiState.Success)?.data.orEmpty() }
+    val communities = remember(communitiesState) { (communitiesState as? UiState.Success)?.data.orEmpty() }
+    val tournaments = remember(tournamentsState) { (tournamentsState as? UiState.Success)?.data.orEmpty() }
 
     var selectedSection by remember { mutableIntStateOf(0) } // 0=LAN Lobby, 1=Party & Voice, 2=Tournaments & Clubs
     var showHostWorldDialog by remember { mutableStateOf(false) }
@@ -302,7 +302,7 @@ fun PlayScreen(
 
     if (showHostWorldDialog) {
         HostWorldDialog(
-            defaultLan = viewModel.detectLocalLanIp(),
+            loadDefaultLan = { viewModel.detectLocalLanIpAsync() },
             onDismiss = { showHostWorldDialog = false },
             onHost = { name, game, mode, lan, max ->
                 viewModel.hostWorld(name, game, mode, lan, max)
@@ -664,16 +664,24 @@ fun CommunityCard(
 
 @Composable
 private fun HostWorldDialog(
-    defaultLan: String,
+    loadDefaultLan: suspend () -> String,
     onDismiss: () -> Unit,
     onHost: (name: String, game: String, mode: String, lan: String, maxPlayers: Long) -> Unit
 ) {
     var worldName by remember { mutableStateOf("Diamond Sky Realm") }
     var gameName by remember { mutableStateOf("Minecraft") }
     var gameMode by remember { mutableStateOf("Survival") }
-    var lanAddress by remember { mutableStateOf(defaultLan) }
+    var lanAddress by remember { mutableStateOf("") }
+    var lanEdited by remember { mutableStateOf(false) }
     var multiplayerChecked by remember { mutableStateOf(true) }
     var lanVisibleChecked by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        val detected = loadDefaultLan()
+        if (!lanEdited && lanAddress.isBlank()) {
+            lanAddress = detected
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -704,12 +712,16 @@ private fun HostWorldDialog(
                 )
                 OutlinedTextField(
                     value = lanAddress,
-                    onValueChange = { lanAddress = it.take(80) },
+                    onValueChange = {
+                        lanEdited = true
+                        lanAddress = it.take(80)
+                    },
                     label = { Text("LAN IP : Port") },
+                    placeholder = { Text("Detecting local LAN IP...") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(listOf("Survival", "Creative", "Adventure", "Minigame")) { m ->
+                    items(listOf("Survival", "Creative", "Adventure", "Minigame"), key = { it }) { m ->
                         FilterChip(selected = gameMode == m, onClick = { gameMode = m }, label = { Text(m) })
                     }
                 }
@@ -743,7 +755,7 @@ private fun CreatePartyDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(value = name, onValueChange = { name = it.take(60) }, label = { Text("Party Name") }, modifier = Modifier.fillMaxWidth())
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(ArcadeCatalog.popularGames) { g ->
+                    items(ArcadeCatalog.popularGames, key = { it }) { g ->
                         FilterChip(selected = game == g, onClick = { game = g }, label = { Text(g) })
                     }
                 }

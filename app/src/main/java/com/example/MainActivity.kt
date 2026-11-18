@@ -112,26 +112,9 @@ fun MobiliveArcadeApp(currentUserId: String) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: ArcadeRoutes.HOME
 
-    val userPrivateState by viewModel.userPrivate.collectAsStateWithLifecycle()
-    val myProfileState by viewModel.myProfile.collectAsStateWithLifecycle()
-    val allProfilesState by viewModel.allProfiles.collectAsStateWithLifecycle()
-    val postsState by viewModel.posts.collectAsStateWithLifecycle()
-    val streamsState by viewModel.streams.collectAsStateWithLifecycle()
-    val worldsState by viewModel.worlds.collectAsStateWithLifecycle()
-    val partiesState by viewModel.parties.collectAsStateWithLifecycle()
-    val communitiesState by viewModel.communities.collectAsStateWithLifecycle()
-    val tournamentsState by viewModel.tournaments.collectAsStateWithLifecycle()
-    val friendRequestsState by viewModel.friendRequests.collectAsStateWithLifecycle()
-    val conversationsState by viewModel.conversations.collectAsStateWithLifecycle()
-    val galleryState by viewModel.gallery.collectAsStateWithLifecycle()
-    val notificationsState by viewModel.notifications.collectAsStateWithLifecycle()
-
     val postForComments by viewModel.postForComments.collectAsStateWithLifecycle()
     val commentsState by viewModel.selectedPostComments.collectAsStateWithLifecycle()
     val levelUpBanner by viewModel.levelUpBanner.collectAsStateWithLifecycle()
-
-    val userPrivate = (userPrivateState as? UiState.Success)?.data
-    val myProfile = (myProfileState as? UiState.Success)?.data
 
     var selectedStreamId by remember { mutableStateOf<String?>(null) }
     var selectedConversationId by remember { mutableStateOf<String?>(null) }
@@ -260,10 +243,17 @@ fun MobiliveArcadeApp(currentUserId: String) {
                             .widthIn(max = 840.dp)
                     ) {
                         composable(ArcadeRoutes.HOME) {
+                            val userPrivateState by viewModel.userPrivate.collectAsStateWithLifecycle()
+                            val myProfileState by viewModel.myProfile.collectAsStateWithLifecycle()
+                            val allProfilesState by viewModel.allProfiles.collectAsStateWithLifecycle()
+                            val postsState by viewModel.posts.collectAsStateWithLifecycle()
+                            val streamsState by viewModel.streams.collectAsStateWithLifecycle()
+                            val worldsState by viewModel.worlds.collectAsStateWithLifecycle()
+                            val notificationsState by viewModel.notifications.collectAsStateWithLifecycle()
                             HomeScreen(
                                 viewModel = viewModel,
-                                userPrivate = userPrivate,
-                                myProfile = myProfile,
+                                userPrivate = (userPrivateState as? UiState.Success)?.data,
+                                myProfile = (myProfileState as? UiState.Success)?.data,
                                 postsState = postsState,
                                 streamsState = streamsState,
                                 profilesState = allProfilesState,
@@ -284,9 +274,12 @@ fun MobiliveArcadeApp(currentUserId: String) {
                         }
 
                         composable(ArcadeRoutes.WATCH) {
+                            val userPrivateState by viewModel.userPrivate.collectAsStateWithLifecycle()
+                            val streamsState by viewModel.streams.collectAsStateWithLifecycle()
+                            val postsState by viewModel.posts.collectAsStateWithLifecycle()
                             WatchScreen(
                                 viewModel = viewModel,
-                                userPrivate = userPrivate,
+                                userPrivate = (userPrivateState as? UiState.Success)?.data,
                                 streamsState = streamsState,
                                 postsState = postsState,
                                 selectedStreamId = selectedStreamId,
@@ -295,6 +288,10 @@ fun MobiliveArcadeApp(currentUserId: String) {
                         }
 
                         composable(ArcadeRoutes.PLAY) {
+                            val worldsState by viewModel.worlds.collectAsStateWithLifecycle()
+                            val partiesState by viewModel.parties.collectAsStateWithLifecycle()
+                            val communitiesState by viewModel.communities.collectAsStateWithLifecycle()
+                            val tournamentsState by viewModel.tournaments.collectAsStateWithLifecycle()
                             PlayScreen(
                                 viewModel = viewModel,
                                 worldsState = worldsState,
@@ -306,9 +303,14 @@ fun MobiliveArcadeApp(currentUserId: String) {
                         }
 
                         composable(ArcadeRoutes.SOCIAL) {
+                            val userPrivateState by viewModel.userPrivate.collectAsStateWithLifecycle()
+                            val allProfilesState by viewModel.allProfiles.collectAsStateWithLifecycle()
+                            val friendRequestsState by viewModel.friendRequests.collectAsStateWithLifecycle()
+                            val conversationsState by viewModel.conversations.collectAsStateWithLifecycle()
+                            val communitiesState by viewModel.communities.collectAsStateWithLifecycle()
                             SocialScreen(
                                 viewModel = viewModel,
-                                userPrivate = userPrivate,
+                                userPrivate = (userPrivateState as? UiState.Success)?.data,
                                 profilesState = allProfilesState,
                                 friendRequestsState = friendRequestsState,
                                 conversationsState = conversationsState,
@@ -319,9 +321,15 @@ fun MobiliveArcadeApp(currentUserId: String) {
                         }
 
                         composable(ArcadeRoutes.PROFILE) {
+                            val userPrivateState by viewModel.userPrivate.collectAsStateWithLifecycle()
+                            val myProfileState by viewModel.myProfile.collectAsStateWithLifecycle()
+                            val galleryState by viewModel.gallery.collectAsStateWithLifecycle()
+                            val streamsState by viewModel.streams.collectAsStateWithLifecycle()
+                            val postsState by viewModel.posts.collectAsStateWithLifecycle()
+                            val allProfilesState by viewModel.allProfiles.collectAsStateWithLifecycle()
                             ProfileScreen(
                                 viewModel = viewModel,
-                                userPrivate = userPrivate,
+                                userPrivate = (userPrivateState as? UiState.Success)?.data,
                                 myProfileState = myProfileState,
                                 galleryState = galleryState,
                                 streamsState = streamsState,

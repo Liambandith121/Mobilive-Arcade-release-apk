@@ -53,10 +53,14 @@ fun ProfileScreen(
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
     val myProfile = (myProfileState as? UiState.Success)?.data
-    val gallery = (galleryState as? UiState.Success)?.data.orEmpty()
-    val myStreams = (streamsState as? UiState.Success)?.data.orEmpty().filter { it.hostId == viewModel.currentUserId }
-    val myPosts = (postsState as? UiState.Success)?.data.orEmpty().filter { it.authorId == viewModel.currentUserId }
-    val allProfiles = (allProfilesState as? UiState.Success)?.data.orEmpty()
+    val gallery = remember(galleryState) { (galleryState as? UiState.Success)?.data.orEmpty() }
+    val myStreams = remember(streamsState, viewModel.currentUserId) {
+        (streamsState as? UiState.Success)?.data.orEmpty().filter { it.hostId == viewModel.currentUserId }
+    }
+    val myPosts = remember(postsState, viewModel.currentUserId) {
+        (postsState as? UiState.Success)?.data.orEmpty().filter { it.authorId == viewModel.currentUserId }
+    }
+    val allProfiles = remember(allProfilesState) { (allProfilesState as? UiState.Success)?.data.orEmpty() }
 
     var selectedSection by remember { mutableIntStateOf(if (openSettingsInitially) 3 else 0) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
@@ -238,7 +242,7 @@ fun ProfileScreen(
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val tabs = listOf("Level & Daily Coins", "Gallery", "Analytics & Badges", "More Settings")
-                    items(tabs.indices.toList()) { idx ->
+                    items(tabs.indices.toList(), key = { it }) { idx ->
                         FilterChip(
                             selected = selectedSection == idx,
                             onClick = { selectedSection = idx },
@@ -284,7 +288,7 @@ fun ProfileScreen(
                                 }
 
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(ArcadeCatalog.dailyRewards) { day ->
+                                    items(ArcadeCatalog.dailyRewards, key = { it.day }) { day ->
                                         val isDone = day.day <= claimedIdx
                                         val isCurrent = day.day == nextDay
                                         Surface(
@@ -318,7 +322,7 @@ fun ProfileScreen(
                     item {
                         Text("Level Up Buff Rewards", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                     }
-                    items(ArcadeCatalog.levelBuffs) { buff ->
+                    items(ArcadeCatalog.levelBuffs, key = { it.code }) { buff ->
                         val unlocked = level >= buff.unlockLevel || (userPrivate?.activeBuffs?.contains(buff.code) == true)
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
@@ -433,11 +437,13 @@ fun ProfileScreen(
                 2 -> {
                     // Creator Analytics + Achievements & Badges
                     item {
+                        val totalLikes = remember(myPosts) { myPosts.sumOf { it.likesCount } }
+                        val totalGifts = remember(myStreams) { myStreams.sumOf { it.totalGiftsCoins } }
                         AnalyticsCanvasCard(
                             postsCount = myPosts.size,
                             streamsCount = myStreams.size,
-                            totalLikes = myPosts.sumOf { it.likesCount },
-                            totalGifts = myStreams.sumOf { it.totalGiftsCoins },
+                            totalLikes = totalLikes,
+                            totalGifts = totalGifts,
                             xp = xp
                         )
                     }
@@ -446,7 +452,7 @@ fun ProfileScreen(
                         Text("Achievements & Badges", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                     }
 
-                    items(ArcadeCatalog.achievements) { ach ->
+                    items(ArcadeCatalog.achievements, key = { it.id }) { ach ->
                         val claimed = userPrivate?.claimedAchievementIds?.contains(ach.id) == true
                         val eligible = level >= ach.requiredLevel
                         Surface(
@@ -534,6 +540,9 @@ private fun ProfileStatItem(label: String, value: String) {
     }
 }
 
+private val AnalyticsBarColors = listOf(CoralLive, CyanNeon, VoltGreen, GoldCoin, VioletArcade)
+private val AnalyticsBarLabels = listOf("Live", "Posts", "Likes", "Gifts", "XP")
+
 @Composable
 private fun AnalyticsCanvasCard(
     postsCount: Int,
@@ -542,6 +551,17 @@ private fun AnalyticsCanvasCard(
     totalGifts: Long,
     xp: Long
 ) {
+    val bars = remember(streamsCount, postsCount, totalLikes, totalGifts, xp) {
+        listOf(
+            (streamsCount.coerceAtLeast(1) * 20f),
+            (postsCount.coerceAtLeast(1) * 18f),
+            (totalLikes.toFloat().coerceAtLeast(10f)),
+            (totalGifts.toFloat().coerceAtLeast(15f)),
+            ((xp / 10f).coerceAtLeast(12f))
+        )
+    }
+    val maxVal = remember(bars) { bars.maxOrNull()?.coerceAtLeast(1f) ?: 1f }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -556,15 +576,6 @@ private fun AnalyticsCanvasCard(
                 ProfileStatItem("Likes", totalLikes.toString())
                 ProfileStatItem("Gifts", totalGifts.toString())
             }
-            val bars = listOf(
-                (streamsCount.coerceAtLeast(1) * 20f),
-                (postsCount.coerceAtLeast(1) * 18f),
-                (totalLikes.toFloat().coerceAtLeast(10f)),
-                (totalGifts.toFloat().coerceAtLeast(15f)),
-                ((xp / 10f).coerceAtLeast(12f))
-            )
-            val maxVal = bars.maxOrNull()?.coerceAtLeast(1f) ?: 1f
-            val barColors = listOf(CoralLive, CyanNeon, VoltGreen, GoldCoin, VioletArcade)
 
             Canvas(
                 modifier = Modifier
@@ -580,7 +591,7 @@ private fun AnalyticsCanvasCard(
                     val x = idx * slotWidth + (slotWidth - barWidth) / 2f
                     val y = size.height - barHeight
                     drawRoundRect(
-                        color = barColors[idx],
+                        color = AnalyticsBarColors[idx],
                         topLeft = Offset(x, y),
                         size = Size(barWidth, barHeight),
                         cornerRadius = CornerRadius(12f, 12f)
@@ -588,7 +599,7 @@ private fun AnalyticsCanvasCard(
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                listOf("Live", "Posts", "Likes", "Gifts", "XP").forEach { lbl ->
+                AnalyticsBarLabels.forEach { lbl ->
                     Text(lbl, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                 }
             }
@@ -719,7 +730,7 @@ private fun EditProfileAvatarDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Choose Avatar (Profile Face):", style = MaterialTheme.typography.labelMedium, color = CyanNeon)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(ArcadeCatalog.avatarPresets) { preset ->
+                    items(ArcadeCatalog.avatarPresets, key = { it.id }) { preset ->
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier

@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
@@ -39,21 +40,31 @@ fun SocialScreen(
     selectedConversationId: String?,
     onSelectConversation: (String?) -> Unit
 ) {
-    val blockedIds = userPrivate?.blockedUserIds.orEmpty()
-    val followingIds = userPrivate?.followingUserIds.orEmpty()
-    val allProfiles = (profilesState as? UiState.Success)?.data.orEmpty()
-        .filter { it.userId != viewModel.currentUserId && it.userId !in blockedIds }
-    val allRequests = (friendRequestsState as? UiState.Success)?.data.orEmpty()
-    val pendingIncoming = allRequests.filter { it.status == "pending" && it.receiverId == viewModel.currentUserId }
-    val acceptedRequests = allRequests.filter { it.status == "accepted" }
-    val friendIds = acceptedRequests.map {
-        if (it.senderId == viewModel.currentUserId) it.receiverId else it.senderId
-    }.toSet()
-    val friendsProfiles = allProfiles.filter { it.userId in friendIds }
-    val conversations = (conversationsState as? UiState.Success)?.data.orEmpty()
-    val communities = (communitiesState as? UiState.Success)?.data.orEmpty()
+    val blockedIds = remember(userPrivate) { userPrivate?.blockedUserIds.orEmpty().toSet() }
+    val followingIds = remember(userPrivate) { userPrivate?.followingUserIds.orEmpty().toSet() }
+    val allProfiles = remember(profilesState, blockedIds, viewModel.currentUserId) {
+        (profilesState as? UiState.Success)?.data.orEmpty()
+            .filter { it.userId != viewModel.currentUserId && it.userId !in blockedIds }
+    }
+    val allRequests = remember(friendRequestsState) {
+        (friendRequestsState as? UiState.Success)?.data.orEmpty()
+    }
+    val pendingIncoming = remember(allRequests, viewModel.currentUserId) {
+        allRequests.filter { it.status == "pending" && it.receiverId == viewModel.currentUserId }
+    }
+    val friendIds = remember(allRequests, viewModel.currentUserId) {
+        allRequests.filter { it.status == "accepted" }.map {
+            if (it.senderId == viewModel.currentUserId) it.receiverId else it.senderId
+        }.toSet()
+    }
+    val friendsProfiles = remember(allProfiles, friendIds) { allProfiles.filter { it.userId in friendIds } }
+    val discoverList = remember(allProfiles, friendIds) { allProfiles.filter { it.userId !in friendIds } }
+    val conversations = remember(conversationsState) { (conversationsState as? UiState.Success)?.data.orEmpty() }
+    val communities = remember(communitiesState) { (communitiesState as? UiState.Success)?.data.orEmpty() }
 
-    val activeConversation = conversations.firstOrNull { it.id == selectedConversationId }
+    val activeConversation = remember(conversations, selectedConversationId) {
+        conversations.firstOrNull { it.id == selectedConversationId }
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0=Messages, 1=Friends & Discover, 2=Communities
     var showNewChatDialog by remember { mutableStateOf(false) }
@@ -247,7 +258,6 @@ fun SocialScreen(
                             item {
                                 Text("Discover Players & Creators", style = MaterialTheme.typography.titleMedium, color = CyanNeon)
                             }
-                            val discoverList = allProfiles.filter { it.userId !in friendIds }
                             if (discoverList.isEmpty()) {
                                 item {
                                     EmptyArcadeState(
@@ -416,7 +426,7 @@ private fun ConversationDetailView(
     viewModel: ArcadeViewModel,
     onBack: () -> Unit
 ) {
-    val messagesState by viewModel.selectedMessages.collectAsState()
+    val messagesState by viewModel.selectedMessages.collectAsStateWithLifecycle()
     val messages = (messagesState as? UiState.Success)?.data.orEmpty()
     var input by remember { mutableStateOf("") }
 

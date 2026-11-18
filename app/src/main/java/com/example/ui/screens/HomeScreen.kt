@@ -54,14 +54,20 @@ fun HomeScreen(
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
-    val blockedIds = userPrivate?.blockedUserIds.orEmpty()
-    val posts = (postsState as? UiState.Success)?.data.orEmpty().filter { it.authorId !in blockedIds }
-    val stories = posts.filter { it.postType == "STORY" }
-    val feedPosts = posts.filter { it.postType == "POST" }
-    val liveStreams = (streamsState as? UiState.Success)?.data.orEmpty()
-        .filter { it.streamStatus == "live" && it.hostId !in blockedIds }
-    val notifications = (notificationsState as? UiState.Success)?.data.orEmpty()
-    val unreadNotifs = notifications.count { !it.readFlag }
+    val blockedIds = remember(userPrivate) { userPrivate?.blockedUserIds.orEmpty().toSet() }
+    val posts = remember(postsState, blockedIds) {
+        (postsState as? UiState.Success)?.data.orEmpty().filter { it.authorId !in blockedIds }
+    }
+    val stories = remember(posts) { posts.filter { it.postType == "STORY" } }
+    val feedPosts = remember(posts) { posts.filter { it.postType == "POST" } }
+    val liveStreams = remember(streamsState, blockedIds) {
+        (streamsState as? UiState.Success)?.data.orEmpty()
+            .filter { it.streamStatus == "live" && it.hostId !in blockedIds }
+    }
+    val notifications = remember(notificationsState) {
+        (notificationsState as? UiState.Success)?.data.orEmpty()
+    }
+    val unreadNotifs = remember(notifications) { notifications.count { !it.readFlag } }
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var initialCreateType by remember { mutableStateOf("POST") }
@@ -399,10 +405,16 @@ fun HomeScreen(
     }
 
     if (showSearchSheet) {
+        val searchProfiles = remember(profilesState, blockedIds) {
+            (profilesState as? UiState.Success)?.data.orEmpty().filter { it.userId !in blockedIds }
+        }
+        val searchWorlds = remember(worldsState) {
+            (worldsState as? UiState.Success)?.data.orEmpty()
+        }
         SearchModalSheet(
-            profiles = (profilesState as? UiState.Success)?.data.orEmpty().filter { it.userId !in blockedIds },
+            profiles = searchProfiles,
             streams = liveStreams,
-            worlds = (worldsState as? UiState.Success)?.data.orEmpty(),
+            worlds = searchWorlds,
             posts = posts,
             onDismiss = { showSearchSheet = false },
             onSelectStream = { streamId ->
@@ -439,7 +451,7 @@ fun HomeScreen(
 
     if (selectedUserProfile != null) {
         val target = selectedUserProfile!!
-        val followingIds = userPrivate?.followingUserIds.orEmpty()
+        val followingIds = remember(userPrivate) { userPrivate?.followingUserIds.orEmpty().toSet() }
         UserProfileBottomSheet(
             profile = target,
             isOwnProfile = target.userId == viewModel.currentUserId,
@@ -764,7 +776,7 @@ fun CreatePostDialog(
                     }
                 }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(ArcadeCatalog.popularGames) { game ->
+                    items(ArcadeCatalog.popularGames, key = { it }) { game ->
                         FilterChip(
                             selected = selectedGame == game,
                             onClick = { selectedGame = game },
@@ -839,11 +851,19 @@ private fun SearchModalSheet(
                 modifier = Modifier.fillMaxWidth().testTag("search_input"),
                 singleLine = true
             )
-            val q = query.trim().lowercase()
-            val matchedStreams = streams.filter { q.isEmpty() || it.title.lowercase().contains(q) || it.gameTitle.lowercase().contains(q) }
-            val matchedProfiles = profiles.filter { q.isEmpty() || it.displayName.lowercase().contains(q) || it.handle.lowercase().contains(q) }
-            val matchedWorlds = worlds.filter { q.isEmpty() || it.worldName.lowercase().contains(q) }
-            val matchedPosts = posts.filter { q.isNotEmpty() && it.caption.lowercase().contains(q) }
+            val q = remember(query) { query.trim().lowercase() }
+            val matchedStreams = remember(q, streams) {
+                streams.filter { q.isEmpty() || it.title.lowercase().contains(q) || it.gameTitle.lowercase().contains(q) }
+            }
+            val matchedProfiles = remember(q, profiles) {
+                profiles.filter { q.isEmpty() || it.displayName.lowercase().contains(q) || it.handle.lowercase().contains(q) }
+            }
+            val matchedWorlds = remember(q, worlds) {
+                worlds.filter { q.isEmpty() || it.worldName.lowercase().contains(q) }
+            }
+            val matchedPosts = remember(q, posts) {
+                posts.filter { q.isNotEmpty() && it.caption.lowercase().contains(q) }
+            }
 
             LazyColumn(
                 modifier = Modifier.heightIn(max = 360.dp),

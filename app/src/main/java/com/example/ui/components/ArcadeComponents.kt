@@ -36,6 +36,9 @@ import com.example.data.PostComment
 import com.example.data.SocialPost
 import com.example.ui.theme.*
 
+private val LiveRingBrush = Brush.linearGradient(listOf(CoralLive, GoldCoin, CyanNeon))
+private val DefaultRingBrush = Brush.linearGradient(listOf(CyanNeon.copy(alpha = 0.7f), VioletArcade.copy(alpha = 0.7f)))
+
 @Composable
 fun AvatarFace(
     avatarStyle: String,
@@ -45,11 +48,7 @@ fun AvatarFace(
     showVerified: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val ringBrush = if (isLive) {
-        Brush.linearGradient(listOf(CoralLive, GoldCoin, CyanNeon))
-    } else {
-        Brush.linearGradient(listOf(CyanNeon.copy(alpha = 0.7f), VioletArcade.copy(alpha = 0.7f)))
-    }
+    val ringBrush = if (isLive) LiveRingBrush else DefaultRingBrush
 
     Box(
         modifier = modifier.size(size),

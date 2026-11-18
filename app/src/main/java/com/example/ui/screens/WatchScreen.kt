@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.*
@@ -46,15 +47,23 @@ fun WatchScreen(
     onSelectStream: (String?) -> Unit
 ) {
     val context = LocalContext.current
-    val blockedIds = userPrivate?.blockedUserIds.orEmpty()
-    val allStreams = (streamsState as? UiState.Success)?.data.orEmpty().filter { it.hostId !in blockedIds }
-    val liveStreams = allStreams.filter { it.streamStatus == "live" }
-    val replayStreams = allStreams.filter { it.streamStatus == "replay" }
-    val shorts = (postsState as? UiState.Success)?.data.orEmpty()
-        .filter { it.postType == "SHORT" && it.authorId !in blockedIds }
+    val blockedIds = remember(userPrivate) { userPrivate?.blockedUserIds.orEmpty().toSet() }
+    val allStreams = remember(streamsState, blockedIds) {
+        (streamsState as? UiState.Success)?.data.orEmpty().filter { it.hostId !in blockedIds }
+    }
+    val liveStreams = remember(allStreams) { allStreams.filter { it.streamStatus == "live" } }
+    val replayStreams = remember(allStreams) { allStreams.filter { it.streamStatus == "replay" } }
+    val shorts = remember(postsState, blockedIds) {
+        (postsState as? UiState.Success)?.data.orEmpty()
+            .filter { it.postType == "SHORT" && it.authorId !in blockedIds }
+    }
 
-    val activeStream = allStreams.firstOrNull { it.id == selectedStreamId }
-    val myActiveStream = liveStreams.firstOrNull { it.hostId == viewModel.currentUserId }
+    val activeStream = remember(allStreams, selectedStreamId) {
+        allStreams.firstOrNull { it.id == selectedStreamId }
+    }
+    val myActiveStream = remember(liveStreams, viewModel.currentUserId) {
+        liveStreams.firstOrNull { it.hostId == viewModel.currentUserId }
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0=Live, 1=Shorts, 2=Replays
     var showGoLiveDialog by remember { mutableStateOf(false) }
@@ -476,19 +485,9 @@ private fun StreamPlayerView(
     onBack: () -> Unit,
     onOpenManager: () -> Unit
 ) {
-    val chatState by viewModel.selectedStreamChat.collectAsState()
+    val chatState by viewModel.selectedStreamChat.collectAsStateWithLifecycle()
     val messages = (chatState as? UiState.Success)?.data.orEmpty()
     var chatInput by remember { mutableStateOf("") }
-    var elapsedSec by remember { mutableLongStateOf(stream.durationSec) }
-
-    LaunchedEffect(stream.id, stream.streamStatus) {
-        if (stream.streamStatus == "live") {
-            while (true) {
-                delay(1000L)
-                elapsedSec += 1L
-            }
-        }
-    }
 
     Scaffold(
         containerColor = ObsidianBg,
@@ -543,7 +542,11 @@ private fun StreamPlayerView(
                         .padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    LivePulseTag(if (stream.streamStatus == "replay") "REPLAY" else "LIVE • ${elapsedSec}s")
+                    LiveElapsedBadge(
+                        streamId = stream.id,
+                        streamStatus = stream.streamStatus,
+                        initialDurationSec = stream.durationSec
+                    )
                     CoinPill(coins = stream.totalGiftsCoins)
                 }
                 Surface(
@@ -670,7 +673,7 @@ private fun GoLiveSetupDialog(
                     modifier = Modifier.fillMaxWidth().testTag("stream_title_input")
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(ArcadeCatalog.popularGames) { g ->
+                    items(ArcadeCatalog.popularGames, key = { it }) { g ->
                         FilterChip(selected = selectedGame == g, onClick = { selectedGame = g }, label = { Text(g) })
                     }
                 }
@@ -762,3 +765,24 @@ private fun StreamManagerDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }
+
+@Composable
+private fun LiveElapsedBadge(
+    streamId: String,
+    streamStatus: String,
+    initialDurationSec: Long
+) {
+    var elapsedSec by remember(streamId) { mutableLongStateOf(initialDurationSec) }
+    LaunchedEffect(streamId, streamStatus) {
+        if (streamStatus == "live") {
+            while (true) {
+                delay(1000L)
+                elapsedSec += 1L
+            }
+        }
+    }
+    LivePulseTag(
+        if (streamStatus == "live") "LIVE • ${elapsedSec}s" else "REPLAY • ${initialDurationSec}s"
+    )
+}
+

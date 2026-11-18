@@ -11,12 +11,14 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -833,6 +835,9 @@ class ArcadeRepository(
     ): Result<Unit> = runMutation(OperationType.CREATE, "worlds") { uid ->
         val cleanName = worldName.trim().take(80)
         require(cleanName.isNotEmpty()) { "World name is required" }
+        val resolvedLanAddress = lanAddress.ifBlank {
+            withContext(Dispatchers.IO) { "${detectLocalIpv4Address()}:19132" }
+        }.take(80)
         db.collection("worlds").document().set(
             mapOf(
                 "hostId" to uid,
@@ -841,7 +846,7 @@ class ArcadeRepository(
                 "worldName" to cleanName,
                 "gameName" to gameName.ifBlank { "Minecraft" }.take(50),
                 "gameMode" to gameMode,
-                "lanAddress" to lanAddress.ifBlank { "${detectLocalIpv4Address()}:19132" }.take(80),
+                "lanAddress" to resolvedLanAddress,
                 "lanVisible" to true,
                 "multiplayerOn" to true,
                 "worldStatus" to "open",

@@ -15,6 +15,7 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -46,6 +47,7 @@ class ArcadeViewModel(
                 Log.w(TAG, "Error observing $label", root)
                 emit(UiState.Error(root.unwrapFirestoreMessage("Failed to load $label")))
             }
+            .flowOn(Dispatchers.Default)
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
@@ -159,7 +161,9 @@ class ArcadeViewModel(
         _selectedPostForComments.value = post
     }
 
-    fun detectLocalLanIp(): String = "${repository.detectLocalIpv4Address()}:19132"
+    suspend fun detectLocalLanIpAsync(): String = withContext(Dispatchers.IO) {
+        "${repository.detectLocalIpv4Address()}:19132"
+    }
 
     fun completeOnboarding(
         displayName: String,
