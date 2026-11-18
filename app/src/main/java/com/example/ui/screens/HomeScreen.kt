@@ -76,6 +76,16 @@ fun HomeScreen(
     var viewingStory by remember { mutableStateOf<SocialPost?>(null) }
     var reportingTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var selectedUserProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var showStatusSheet by remember { mutableStateOf(false) }
+
+    val myStatusKey = remember(myProfile, userPrivate) {
+        when {
+            myProfile?.liveNow == true -> "live"
+            userPrivate?.privacyShowOnline == false && (myProfile?.playerStatus.isNullOrBlank() || myProfile?.playerStatus == PlayerStatusOption.ONLINE.key) -> PlayerStatusOption.AWAY.key
+            else -> PlayerStatusOption.fromKey(myProfile?.playerStatus).key
+        }
+    }
+    val myStatusSpec = remember(myStatusKey) { statusVisualSpec(myStatusKey) }
 
     Scaffold(
         containerColor = ObsidianBg,
@@ -91,11 +101,29 @@ fun HomeScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Text(
-                            text = myProfile?.let { "@${it.handle}" } ?: "Arcade Feed",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CyanNeon
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showStatusSheet = true }
+                                .padding(vertical = 2.dp)
+                                .testTag("home_status_button")
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(myStatusSpec.color)
+                            )
+                            Text(
+                                text = myProfile?.let { "@${it.handle} • ${myStatusSpec.label}" } ?: "Arcade Feed",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = myStatusSpec.color,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -463,6 +491,19 @@ fun HomeScreen(
                 viewModel.sendFriendRequest(target)
             },
             actionLabel = "Add Friend"
+        )
+    }
+
+    if (showStatusSheet) {
+        StatusPickerBottomSheet(
+            currentStatusKey = PlayerStatusOption.fromKey(myProfile?.playerStatus).key,
+            currentGame = myProfile?.currentGame ?: "Minecraft",
+            isLiveNow = myProfile?.liveNow == true,
+            onDismiss = { showStatusSheet = false },
+            onSelectStatus = { option ->
+                viewModel.updatePlayerStatus(option.key)
+                showStatusSheet = false
+            }
         )
     }
 }

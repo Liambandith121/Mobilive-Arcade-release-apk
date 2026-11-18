@@ -2,8 +2,10 @@ package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -13,14 +15,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.ArcadeCatalog
+import com.example.data.PlayerStatusOption
 import com.example.data.UserProfile
 import com.example.data.formattedJoinDate
+import com.example.data.resolvedStatusKey
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,7 +38,8 @@ fun UserProfileBottomSheet(
     onDismiss: () -> Unit,
     onToggleFollow: () -> Unit,
     onMessageOrAdd: () -> Unit,
-    actionLabel: String = "Message"
+    actionLabel: String = "Message",
+    onOpenStatusPicker: (() -> Unit)? = null
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -45,6 +52,7 @@ fun UserProfileBottomSheet(
             onToggleFollow = onToggleFollow,
             onMessageOrAdd = onMessageOrAdd,
             actionLabel = actionLabel,
+            onOpenStatusPicker = onOpenStatusPicker,
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
@@ -62,6 +70,7 @@ fun UserProfileCard(
     onToggleFollow: () -> Unit,
     onMessageOrAdd: () -> Unit,
     actionLabel: String = "Message",
+    onOpenStatusPicker: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val nextLevelXp = ArcadeCatalog.xpForNextLevel(profile.level)
@@ -103,6 +112,13 @@ fun UserProfileCard(
             text = "@${profile.handle.ifBlank { "player" }} • ${profile.currentGame.ifBlank { "Minecraft" }}",
             style = MaterialTheme.typography.labelLarge,
             color = CyanNeon
+        )
+
+        ProfileStatusButton(
+            statusKey = profile.resolvedStatusKey(),
+            currentGame = profile.currentGame,
+            onClick = if (isOwnProfile) onOpenStatusPicker else null,
+            modifier = Modifier.testTag("user_profile_status_button")
         )
 
         Surface(
@@ -235,3 +251,217 @@ private fun UserProfileStat(label: String, value: String) {
         )
     }
 }
+
+data class StatusVisualSpec(
+    val label: String,
+    val color: Color,
+    val containerColor: Color,
+    val icon: ImageVector
+)
+
+fun statusVisualSpec(statusKey: String): StatusVisualSpec = when (statusKey) {
+    "live" -> StatusVisualSpec("Broadcasting LIVE", CoralLive, CoralContainer, Icons.Rounded.Sensors)
+    PlayerStatusOption.IN_GAME.key -> StatusVisualSpec("In-Game", CyanNeon, CyanContainer, Icons.Rounded.SportsEsports)
+    PlayerStatusOption.LFG.key -> StatusVisualSpec("Squad Ready", GoldCoin, GoldContainer, Icons.Rounded.Groups)
+    PlayerStatusOption.AWAY.key -> StatusVisualSpec("Away", TextMuted, ObsidianSurfaceElevated, Icons.Rounded.Bedtime)
+    else -> StatusVisualSpec("Online", VoltGreen, VoltGreenContainer, Icons.Rounded.RadioButtonChecked)
+}
+
+@Composable
+fun ProfileStatusButton(
+    statusKey: String,
+    currentGame: String = "Minecraft",
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
+) {
+    val spec = statusVisualSpec(statusKey)
+    val statusText = if (statusKey == PlayerStatusOption.IN_GAME.key && currentGame.isNotBlank()) {
+        "${spec.label} • $currentGame"
+    } else {
+        spec.label
+    }
+
+    val shape = RoundedCornerShape(if (compact) 50 else 14)
+    Surface(
+        modifier = modifier
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .heightIn(min = if (compact) 40.dp else 48.dp)
+                        .clip(shape)
+                        .clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            ),
+        shape = shape,
+        color = spec.containerColor.copy(alpha = 0.65f),
+        border = BorderStroke(1.dp, spec.color.copy(alpha = 0.6f))
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = if (compact) 10.dp else 14.dp,
+                vertical = if (compact) 6.dp else 10.dp
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(spec.color)
+            )
+            Icon(
+                imageVector = spec.icon,
+                contentDescription = "Status ${spec.label}",
+                tint = spec.color,
+                modifier = Modifier.size(if (compact) 15.dp else 18.dp)
+            )
+            Text(
+                text = if (compact) spec.label else "Status: $statusText",
+                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
+                color = TextPrimary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = if (compact) Modifier else Modifier.weight(1f, fill = false)
+            )
+            if (onClick != null) {
+                if (!compact) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "Change",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = spec.color,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Change profile status",
+                    tint = spec.color,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun StatusPickerBottomSheet(
+    currentStatusKey: String,
+    currentGame: String,
+    isLiveNow: Boolean,
+    onDismiss: () -> Unit,
+    onSelectStatus: (PlayerStatusOption) -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = ObsidianSurface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+                .testTag("status_picker_sheet"),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Profile Status",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (isLiveNow) {
+                            "You are broadcasting LIVE. Pick your standby status too:"
+                        } else {
+                            "Choose how friends and squads see you in Mobilive Arcade."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            PlayerStatusOption.selectable.forEach { option ->
+                val spec = statusVisualSpec(option.key)
+                val selected = currentStatusKey == option.key
+                val subtitle = if (option == PlayerStatusOption.IN_GAME && currentGame.isNotBlank()) {
+                    "Playing $currentGame"
+                } else {
+                    option.description
+                }
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { onSelectStatus(option) }
+                        .testTag("status_option_${option.key}"),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (selected) spec.containerColor.copy(alpha = 0.7f) else ObsidianSurfaceElevated,
+                    border = BorderStroke(
+                        width = if (selected) 1.5.dp else 1.dp,
+                        color = if (selected) spec.color else ObsidianOutline
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(spec.color.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = spec.icon,
+                                contentDescription = option.label,
+                                tint = spec.color,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = option.label,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        if (selected) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = "Selected status",
+                                tint = spec.color
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -46,6 +46,7 @@
         "liveNow": { "type": "boolean" },
         "searchable": { "type": "boolean" },
         "currentGame": { "type": "string" },
+        "playerStatus": { "type": "string", "enum": ["online", "in_game", "lfg", "away"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

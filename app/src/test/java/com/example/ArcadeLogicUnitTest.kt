@@ -1,8 +1,11 @@
 package com.example
 
 import com.example.data.ArcadeCatalog
+import com.example.data.PlayerStatusOption
 import com.example.data.UserProfile
 import com.example.data.formattedJoinDate
+import com.example.data.formattedStatusLabel
+import com.example.data.resolvedStatusKey
 import com.example.data.unwrapFirestoreMessage
 import com.google.firebase.Timestamp
 import org.junit.Assert.assertEquals
@@ -56,5 +59,20 @@ class ArcadeLogicUnitTest {
 
         val withoutMessage = IllegalStateException()
         assertEquals("Fallback", withoutMessage.unwrapFirestoreMessage("Fallback"))
+    }
+
+    @Test
+    fun `userProfile resolvedStatusKey and formattedStatusLabel prioritize live and normalize keys`() {
+        val liveProfile = UserProfile(liveNow = true, playerStatus = "away")
+        assertEquals("live", liveProfile.resolvedStatusKey())
+        assertEquals("LIVE", liveProfile.formattedStatusLabel())
+
+        val lfgProfile = UserProfile(liveNow = false, playerStatus = "lfg")
+        assertEquals("lfg", lfgProfile.resolvedStatusKey())
+        assertEquals("Squad Ready", lfgProfile.formattedStatusLabel())
+
+        val unknownProfile = UserProfile(liveNow = false, playerStatus = "unknown")
+        assertEquals(PlayerStatusOption.ONLINE.key, unknownProfile.resolvedStatusKey())
+        assertEquals("Online", unknownProfile.formattedStatusLabel())
     }
 }

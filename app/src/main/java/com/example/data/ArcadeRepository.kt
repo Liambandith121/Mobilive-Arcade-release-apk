@@ -109,6 +109,7 @@ class ArcadeRepository(
                     "liveNow" to false,
                     "searchable" to true,
                     "currentGame" to "Minecraft",
+                    "playerStatus" to "online",
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -196,6 +197,35 @@ class ArcadeRepository(
                 "updatedAt" to FieldValue.serverTimestamp()
             )
         ).await()
+    }
+
+    suspend fun updatePlayerStatus(status: String): Result<Unit> {
+        val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
+        val normalized = PlayerStatusOption.fromKey(status).key
+        return try {
+            val batch = db.batch()
+            batch.update(
+                db.collection("public_profiles").document(uid),
+                mapOf(
+                    "playerStatus" to normalized,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.update(
+                db.collection("users").document(uid),
+                mapOf(
+                    "privacyShowOnline" to (normalized != PlayerStatusOption.AWAY.key),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "public_profiles/$uid")
+            Result.failure(e)
+        }
     }
 
     // --- Level System, Buffs, Daily Gift Coins & Achievements ---
@@ -341,7 +371,9 @@ class ArcadeRepository(
         lanVisible: Boolean,
         autoSaveReplays: Boolean
     ): Result<Unit> = runMutation(OperationType.UPDATE, "users") { uid ->
-        db.collection("users").document(uid).update(
+        val batch = db.batch()
+        batch.update(
+            db.collection("users").document(uid),
             mapOf(
                 "privacyDmPolicy" to dmPolicy,
                 "privacyShowOnline" to showOnline,
@@ -349,7 +381,15 @@ class ArcadeRepository(
                 "autoSaveReplays" to autoSaveReplays,
                 "updatedAt" to FieldValue.serverTimestamp()
             )
-        ).await()
+        )
+        batch.update(
+            db.collection("public_profiles").document(uid),
+            mapOf(
+                "playerStatus" to if (showOnline) PlayerStatusOption.ONLINE.key else PlayerStatusOption.AWAY.key,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        batch.commit().await()
     }
 
     suspend fun toggleFollow(userPrivate: UserPrivate, targetProfile: PublicProfile): Result<Boolean> {

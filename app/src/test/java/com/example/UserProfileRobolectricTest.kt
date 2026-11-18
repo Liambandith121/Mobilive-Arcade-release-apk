@@ -3,16 +3,20 @@ package com.example
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import com.example.data.PlayerStatusOption
 import com.example.data.UserProfile
 import com.example.data.formattedJoinDate
 import com.example.data.unwrapFirestoreMessage
 import com.example.ui.auth.GoogleSignInButton
+import com.example.ui.components.ProfileStatusButton
+import com.example.ui.components.StatusPickerBottomSheet
 import com.example.ui.components.UserProfileCard
 import com.example.ui.theme.MobiliveArcadeTheme
 import com.google.firebase.Timestamp
@@ -143,5 +147,86 @@ class UserProfileRobolectricTest {
         val wrapped = RuntimeException("Outer wrapper", fsEx)
         val msg = wrapped.unwrapFirestoreMessage("Fallback")
         assertTrue(msg.contains("PERMISSION_DENIED"))
+    }
+
+    @Test
+    fun `profileStatusButton renders status text and handles click`() {
+        var clicked = 0
+        composeTestRule.setContent {
+            MobiliveArcadeTheme(darkTheme = true) {
+                ProfileStatusButton(
+                    statusKey = PlayerStatusOption.IN_GAME.key,
+                    currentGame = "Minecraft",
+                    onClick = { clicked++ },
+                    modifier = Modifier.testTag("standalone_status_button")
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("standalone_status_button")
+            .assertIsDisplayed()
+            .assertTextContains("In-Game • Minecraft", substring = true)
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(1, clicked)
+    }
+
+    @Test
+    fun `userProfileCard displays status button and opens picker`() {
+        var opened = 0
+        composeTestRule.setContent {
+            MobiliveArcadeTheme(darkTheme = true) {
+                UserProfileCard(
+                    profile = UserProfile(
+                        userId = "u1",
+                        handle = "nova",
+                        displayName = "Nova",
+                        currentGame = "Minecraft",
+                        playerStatus = PlayerStatusOption.LFG.key
+                    ),
+                    isOwnProfile = true,
+                    isFollowing = false,
+                    onToggleFollow = {},
+                    onMessageOrAdd = {},
+                    onOpenStatusPicker = { opened++ }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("user_profile_status_button")
+            .assertIsDisplayed()
+            .assertTextContains("Squad Ready", substring = true)
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(1, opened)
+    }
+
+    @Test
+    fun `statusPickerBottomSheet lists statuses and selects option`() {
+        var selected: PlayerStatusOption? = null
+        composeTestRule.setContent {
+            MobiliveArcadeTheme(darkTheme = true) {
+                StatusPickerBottomSheet(
+                    currentStatusKey = PlayerStatusOption.ONLINE.key,
+                    currentGame = "Valorant Mobile",
+                    isLiveNow = false,
+                    onDismiss = {},
+                    onSelectStatus = { selected = it }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("status_picker_sheet").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("status_option_in_game")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(PlayerStatusOption.IN_GAME, selected)
     }
 }

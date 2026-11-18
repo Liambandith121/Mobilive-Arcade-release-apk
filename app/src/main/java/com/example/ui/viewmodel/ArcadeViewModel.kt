@@ -179,6 +179,16 @@ class ArcadeViewModel(
         }
     }
 
+    fun updatePlayerStatus(status: String) {
+        val option = PlayerStatusOption.fromKey(status)
+        viewModelScope.launch {
+            emitResult(
+                repository.updatePlayerStatus(option.key),
+                "Profile status set to ${option.label}"
+            )
+        }
+    }
+
     fun claimDailyReward() {
         val priv = (userPrivate.value as? UiState.Success)?.data ?: return
         viewModelScope.launch {

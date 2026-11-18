@@ -65,6 +65,15 @@ fun ProfileScreen(
     var selectedSection by remember { mutableIntStateOf(if (openSettingsInitially) 3 else 0) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showUploadMediaDialog by remember { mutableStateOf(false) }
+    var showStatusSheet by remember { mutableStateOf(false) }
+
+    val resolvedStatusKey = remember(myProfile, userPrivate) {
+        when {
+            myProfile?.liveNow == true -> "live"
+            userPrivate?.privacyShowOnline == false && (myProfile?.playerStatus.isNullOrBlank() || myProfile?.playerStatus == PlayerStatusOption.ONLINE.key) -> PlayerStatusOption.AWAY.key
+            else -> PlayerStatusOption.fromKey(myProfile?.playerStatus).key
+        }
+    }
 
     LaunchedEffect(openSettingsInitially) {
         if (openSettingsInitially) selectedSection = 3
@@ -82,6 +91,14 @@ fun ProfileScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = ObsidianBg),
                 title = { Text("Arcade Profile & Rewards", style = MaterialTheme.typography.titleLarge) },
                 actions = {
+                    ProfileStatusButton(
+                        statusKey = resolvedStatusKey,
+                        currentGame = myProfile?.currentGame ?: "Minecraft",
+                        onClick = { showStatusSheet = true },
+                        compact = true,
+                        modifier = Modifier.testTag("topbar_status_button")
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
                     IconButton(
                         onClick = { showEditProfileDialog = true },
                         modifier = Modifier.testTag("edit_profile_button")
@@ -198,6 +215,15 @@ fun ProfileScreen(
                                         )
                                     }
                                 }
+
+                                ProfileStatusButton(
+                                    statusKey = resolvedStatusKey,
+                                    currentGame = myProfile?.currentGame ?: "Minecraft",
+                                    onClick = { showStatusSheet = true },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("profile_status_button")
+                                )
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -527,6 +553,19 @@ fun ProfileScreen(
             onUpload = { title, type, game, uri ->
                 viewModel.addGalleryMedia(title, type, game, uri, if (type == "screenshot") 0L else 30L)
                 showUploadMediaDialog = false
+            }
+        )
+    }
+
+    if (showStatusSheet) {
+        StatusPickerBottomSheet(
+            currentStatusKey = PlayerStatusOption.fromKey(myProfile?.playerStatus).key,
+            currentGame = myProfile?.currentGame ?: "Minecraft",
+            isLiveNow = myProfile?.liveNow == true,
+            onDismiss = { showStatusSheet = false },
+            onSelectStatus = { option ->
+                viewModel.updatePlayerStatus(option.key)
+                showStatusSheet = false
             }
         )
     }

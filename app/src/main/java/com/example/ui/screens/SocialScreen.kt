@@ -396,8 +396,26 @@ private fun PlayerSocialRow(
                 showVerified = profile.verifiedBadge
             )
             Column(modifier = Modifier.weight(1f)) {
+                val statusSpec = statusVisualSpec(profile.resolvedStatusKey())
                 Text(profile.displayName, style = MaterialTheme.typography.titleSmall, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("@${profile.handle} • LV ${profile.level}", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(statusSpec.color)
+                    )
+                    Text(
+                        text = "@${profile.handle} • ${statusSpec.label} • LV ${profile.level}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
             TextButton(onClick = onFollow) {
                 Text(if (isFollowing) "Following" else "Follow", color = CyanNeon)

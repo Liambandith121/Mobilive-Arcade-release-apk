@@ -74,6 +74,7 @@ service cloud.firestore {
              data.liveNow is bool &&
              data.searchable is bool &&
              data.currentGame is string && data.currentGame.size() <= 60 &&
+             (!('playerStatus' in data) || data.playerStatus in ['online', 'in_game', 'lfg', 'away']) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
@@ -333,7 +334,7 @@ service cloud.firestore {
                        incoming().verifiedBadge == false &&
                        incoming().searchable == true &&
                        incoming().keys().hasAll(['userId', 'handle', 'displayName', 'bio', 'avatarStyle', 'avatarPhotoUri', 'level', 'xp', 'followersCount', 'followingCount', 'verifiedBadge', 'liveNow', 'searchable', 'currentGame', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'handle', 'displayName', 'bio', 'avatarStyle', 'avatarPhotoUri', 'level', 'xp', 'followersCount', 'followingCount', 'verifiedBadge', 'liveNow', 'searchable', 'currentGame', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'handle', 'displayName', 'bio', 'avatarStyle', 'avatarPhotoUri', 'level', 'xp', 'followersCount', 'followingCount', 'verifiedBadge', 'liveNow', 'searchable', 'currentGame', 'playerStatus', 'createdAt', 'updatedAt']) &&
                        isValidPublicProfile(incoming());
 
       allow update: if isSignedIn() &&
@@ -343,7 +344,7 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        incoming().verifiedBadge == existing().verifiedBadge && (
                          (isOwner(userId) &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['handle', 'displayName', 'bio', 'avatarStyle', 'avatarPhotoUri', 'level', 'xp', 'followingCount', 'liveNow', 'currentGame', 'updatedAt'])) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['handle', 'displayName', 'bio', 'avatarStyle', 'avatarPhotoUri', 'level', 'xp', 'followingCount', 'liveNow', 'currentGame', 'playerStatus', 'updatedAt'])) ||
                          (incoming().diff(existing()).affectedKeys().hasOnly(['followersCount', 'updatedAt']) &&
                            (incoming().followersCount == existing().followersCount + 1 || incoming().followersCount == existing().followersCount - 1))
                        );

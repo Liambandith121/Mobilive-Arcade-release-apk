@@ -152,6 +152,19 @@ test("Public profile: shadow update verifiedBadge rejected; filtered list succee
     })
   );
 
+  await assertSucceeds(
+    aliceDb.collection("public_profiles").doc(ALICE_UID).update({
+      playerStatus: "lfg",
+      updatedAt: pastDate(1200),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("public_profiles").doc(ALICE_UID).update({
+      playerStatus: "invalid_status",
+      updatedAt: pastDate(1100),
+    })
+  );
+
   // Shadow update on verifiedBadge or ghost field rejected
   await assertFails(
     aliceDb.collection("public_profiles").doc(ALICE_UID).update({
