@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,7 +39,10 @@ fun SocialScreen(
     conversationsState: UiState<List<Conversation>>,
     communitiesState: UiState<List<GameCommunity>>,
     selectedConversationId: String?,
-    onSelectConversation: (String?) -> Unit
+    onSelectConversation: (String?) -> Unit,
+    partiesState: UiState<List<PartyRoom>> = UiState.Loading,
+    partyInvitesState: UiState<List<PartyInvite>> = UiState.Loading,
+    onOpenPartyVoice: () -> Unit = {}
 ) {
     val blockedIds = remember(userPrivate) { userPrivate?.blockedUserIds.orEmpty().toSet() }
     val followingIds = remember(userPrivate) { userPrivate?.followingUserIds.orEmpty().toSet() }
@@ -52,13 +56,39 @@ fun SocialScreen(
     val pendingIncoming = remember(allRequests, viewModel.currentUserId) {
         allRequests.filter { it.status == "pending" && it.receiverId == viewModel.currentUserId }
     }
-    val friendIds = remember(allRequests, viewModel.currentUserId) {
-        allRequests.filter { it.status == "accepted" }.map {
-            if (it.senderId == viewModel.currentUserId) it.receiverId else it.senderId
-        }.toSet()
+    val pendingOutgoing = remember(allRequests, viewModel.currentUserId) {
+        allRequests.filter { it.status == "pending" && it.senderId == viewModel.currentUserId }
     }
-    val friendsProfiles = remember(allProfiles, friendIds) { allProfiles.filter { it.userId in friendIds } }
-    val discoverList = remember(allProfiles, friendIds) { allProfiles.filter { it.userId !in friendIds } }
+    val outgoingTargetIds = remember(pendingOutgoing) {
+        pendingOutgoing.map { it.receiverId }.toSet()
+    }
+    val acceptedRequestsByFriendId = remember(allRequests, viewModel.currentUserId) {
+        allRequests.filter { it.status == "accepted" }.associateBy { req ->
+            if (req.senderId == viewModel.currentUserId) req.receiverId else req.senderId
+        }
+    }
+    val friendIds = remember(acceptedRequestsByFriendId) { acceptedRequestsByFriendId.keys }
+    val friendsProfiles = remember(allProfiles, friendIds) {
+        allProfiles.filter { it.userId in friendIds }
+            .sortedWith(compareBy<UserProfile> { it.statusSortPriority() }.thenBy { it.displayName.lowercase() })
+    }
+    val onlineFriendsCount = remember(friendsProfiles) { friendsProfiles.count { it.isOnlineOrActive() } }
+    val lfgFriendsCount = remember(friendsProfiles) {
+        friendsProfiles.count { it.resolvedStatusKey() == PlayerStatusOption.LFG.key }
+    }
+
+    val allParties = remember(partiesState) { (partiesState as? UiState.Success)?.data.orEmpty() }
+    val allPartyInvites = remember(partyInvitesState) { (partyInvitesState as? UiState.Success)?.data.orEmpty() }
+    val incomingPartyInvites = remember(allPartyInvites, viewModel.currentUserId) {
+        allPartyInvites.filter { it.status == "pending" && it.receiverId == viewModel.currentUserId }
+    }
+    val outgoingPartyInvites = remember(allPartyInvites, viewModel.currentUserId) {
+        allPartyInvites.filter { it.status == "pending" && it.senderId == viewModel.currentUserId }
+    }
+    val invitedFriendIds = remember(outgoingPartyInvites) {
+        outgoingPartyInvites.map { it.receiverId }.toSet()
+    }
+
     val conversations = remember(conversationsState) { (conversationsState as? UiState.Success)?.data.orEmpty() }
     val communities = remember(communitiesState) { (communitiesState as? UiState.Success)?.data.orEmpty() }
 
@@ -66,10 +96,25 @@ fun SocialScreen(
         conversations.firstOrNull { it.id == selectedConversationId }
     }
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0=Messages, 1=Friends & Discover, 2=Communities
+    var selectedTab by remember { mutableIntStateOf(0) } // 0=Chats, 1=Friends & Invites, 2=Clubs
+    var friendSearchQuery by remember { mutableStateOf("") }
+    var selectedStatusFilter by remember { mutableStateOf(FriendStatusFilter.ALL) }
     var showNewChatDialog by remember { mutableStateOf(false) }
+    var showPartyInviteSheet by remember { mutableStateOf(false) }
+    var preselectedFriendForInvite by remember { mutableStateOf<UserProfile?>(null) }
+    var friendPendingRemoval by remember { mutableStateOf<Pair<UserProfile, FriendRequest>?>(null) }
     var reportingTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var selectedUserProfile by remember { mutableStateOf<UserProfile?>(null) }
+
+    val filteredFriends = remember(friendsProfiles, friendSearchQuery, selectedStatusFilter) {
+        friendsProfiles.filterAndSortFriends(friendSearchQuery, selectedStatusFilter)
+    }
+    val discoverList = remember(allProfiles, friendIds, pendingIncoming, friendSearchQuery, selectedStatusFilter) {
+        val incomingSenderIds = pendingIncoming.map { it.senderId }.toSet()
+        allProfiles
+            .filter { it.userId !in friendIds && it.userId !in incomingSenderIds }
+            .filterAndSortFriends(friendSearchQuery, selectedStatusFilter)
+    }
 
     LaunchedEffect(selectedConversationId) {
         viewModel.selectConversation(selectedConversationId)
@@ -97,6 +142,16 @@ fun SocialScreen(
                         }
                     }
                 )
+            },
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = { showNewChatDialog = true },
+                    containerColor = CyanNeon,
+                    contentColor = ObsidianBg,
+                    modifier = Modifier.testTag("social_message_fab")
+                ) {
+                    Icon(Icons.Rounded.Edit, contentDescription = "New Message or Group Chat")
+                }
             }
         ) { padding ->
             Column(
@@ -107,9 +162,10 @@ fun SocialScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    val friendsBadge = if (onlineFriendsCount > 0) " (${onlineFriendsCount} on)" else " (${friendsProfiles.size})"
                     listOf(
                         "Chats (${conversations.size})",
-                        "Friends (${friendsProfiles.size})",
+                        "Friends$friendsBadge",
                         "Clubs (${communities.size})"
                     ).forEachIndexed { idx, label ->
                         SegmentedButton(
@@ -123,11 +179,25 @@ fun SocialScreen(
                     }
                 }
 
+                if (incomingPartyInvites.isNotEmpty() && selectedTab != 1) {
+                    PartyInviteBannerCard(
+                        invite = incomingPartyInvites.first(),
+                        onAccept = {
+                            viewModel.respondPartyInvite(incomingPartyInvites.first(), true) {
+                                onOpenPartyVoice()
+                            }
+                        },
+                        onDecline = {
+                            viewModel.respondPartyInvite(incomingPartyInvites.first(), false)
+                        }
+                    )
+                }
+
                 when (selectedTab) {
                     0 -> {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(bottom = 24.dp)
+                            contentPadding = PaddingValues(bottom = 88.dp)
                         ) {
                             if (conversations.isEmpty()) {
                                 item {
@@ -190,8 +260,42 @@ fun SocialScreen(
                     1 -> {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(bottom = 24.dp)
+                            contentPadding = PaddingValues(bottom = 88.dp)
                         ) {
+                            item {
+                                OnlineFriendsSummaryCard(
+                                    totalFriends = friendsProfiles.size,
+                                    onlineFriends = onlineFriendsCount,
+                                    lfgFriends = lfgFriendsCount,
+                                    pendingPartyInvites = incomingPartyInvites.size,
+                                    onInviteSquad = {
+                                        preselectedFriendForInvite = null
+                                        showPartyInviteSheet = true
+                                    }
+                                )
+                            }
+
+                            if (incomingPartyInvites.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Party Invitations (${incomingPartyInvites.size})",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = CyanNeon
+                                    )
+                                }
+                                items(incomingPartyInvites, key = { "pi_${it.id}" }) { invite ->
+                                    PartyInviteBannerCard(
+                                        invite = invite,
+                                        onAccept = {
+                                            viewModel.respondPartyInvite(invite, true) {
+                                                onOpenPartyVoice()
+                                            }
+                                        },
+                                        onDecline = { viewModel.respondPartyInvite(invite, false) }
+                                    )
+                                }
+                            }
+
                             if (pendingIncoming.isNotEmpty()) {
                                 item {
                                     Text("Friend Requests (${pendingIncoming.size})", style = MaterialTheme.typography.titleMedium, color = GoldCoin)
@@ -228,30 +332,133 @@ fun SocialScreen(
                             }
 
                             item {
-                                Text("My Friends (${friendsProfiles.size})", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                OutlinedTextField(
+                                    value = friendSearchQuery,
+                                    onValueChange = { friendSearchQuery = it.take(40) },
+                                    placeholder = { Text("Search friends or players...") },
+                                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                                    trailingIcon = {
+                                        if (friendSearchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { friendSearchQuery = "" }) {
+                                                Icon(Icons.Rounded.Clear, contentDescription = "Clear search")
+                                            }
+                                        }
+                                    },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("friend_search_input")
+                                )
                             }
-                            if (friendsProfiles.isEmpty()) {
+
+                            item {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(FriendStatusFilter.entries, key = { it.name }) { filter ->
+                                        FilterChip(
+                                            selected = selectedStatusFilter == filter,
+                                            onClick = { selectedStatusFilter = filter },
+                                            label = { Text(filter.label) },
+                                            modifier = Modifier.testTag("friend_filter_${filter.name.lowercase()}")
+                                        )
+                                    }
+                                }
+                            }
+
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "My Friends (${filteredFriends.size})",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = TextPrimary
+                                    )
+                                    if (friendsProfiles.isNotEmpty()) {
+                                        TextButton(
+                                            onClick = {
+                                                preselectedFriendForInvite = null
+                                                showPartyInviteSheet = true
+                                            }
+                                        ) {
+                                            Text("Invite All Online", color = VoltGreen)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (filteredFriends.isEmpty()) {
                                 item {
-                                    Text("No connected friends yet. Send a request to players below!", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                    EmptyArcadeState(
+                                        icon = Icons.Rounded.Groups,
+                                        title = if (friendsProfiles.isEmpty()) "No Friends Connected Yet" else "No Matching Friends",
+                                        subtitle = if (friendsProfiles.isEmpty()) {
+                                            "Send a friend request to players below to track their online status and invite them to multiplayer parties."
+                                        } else {
+                                            "No friends match the selected online status filter or search."
+                                        }
+                                    )
                                 }
                             } else {
-                                items(friendsProfiles, key = { "f_${it.userId}" }) { friend ->
-                                    PlayerSocialRow(
+                                items(filteredFriends, key = { "f_${it.userId}" }) { friend ->
+                                    FriendManagementCard(
                                         profile = friend,
-                                        isFriend = true,
                                         isFollowing = friend.userId in followingIds,
-                                        onViewProfile = { selectedUserProfile = friend },
-                                        onFollow = { viewModel.toggleFollow(friend) },
-                                        onAddOrMessage = {
+                                        hasPendingPartyInvite = friend.userId in invitedFriendIds,
+                                        onInviteToParty = {
+                                            preselectedFriendForInvite = friend
+                                            showPartyInviteSheet = true
+                                        },
+                                        onMessage = {
                                             viewModel.createConversation(
                                                 title = friend.displayName,
                                                 groupChat = false,
                                                 participants = listOf(friend)
                                             ) { convId -> onSelectConversation(convId) }
                                         },
+                                        onToggleFollow = { viewModel.toggleFollow(friend) },
+                                        onViewProfile = { selectedUserProfile = friend },
+                                        onRemoveFriend = {
+                                            val req = acceptedRequestsByFriendId[friend.userId]
+                                            if (req != null) {
+                                                friendPendingRemoval = friend to req
+                                            }
+                                        },
                                         onReport = { reportingTarget = friend.userId to friend.handle },
                                         onBlock = { viewModel.toggleBlockUser(friend.userId, friend.handle) }
                                     )
+                                }
+                            }
+
+                            if (pendingOutgoing.isNotEmpty()) {
+                                item {
+                                    Text("Sent Friend Requests (${pendingOutgoing.size})", style = MaterialTheme.typography.titleMedium, color = TextSecondary)
+                                }
+                                items(pendingOutgoing, key = { "out_${it.id}" }) { req ->
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = ObsidianSurface,
+                                        border = BorderStroke(1.dp, ObsidianOutline),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.ScheduleSend, contentDescription = null, tint = GoldCoin)
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(req.receiverName, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                                                Text("Pending friend request", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                            }
+                                            TextButton(
+                                                onClick = { viewModel.cancelFriendRequest(req.id, req.receiverName) }
+                                            ) {
+                                                Text("Cancel", color = CoralLive)
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -263,18 +470,24 @@ fun SocialScreen(
                                     EmptyArcadeState(
                                         icon = Icons.Rounded.PersonSearch,
                                         title = "Waiting for more players",
-                                        subtitle = "Other Mobilive Arcade players who sign in appear here so you can follow, friend, and chat!"
+                                        subtitle = "Other Mobilive Arcade players who sign in appear here so you can follow, friend, and invite them to parties!"
                                     )
                                 }
                             } else {
                                 items(discoverList, key = { "d_${it.userId}" }) { player ->
+                                    val alreadyRequested = player.userId in outgoingTargetIds
                                     PlayerSocialRow(
                                         profile = player,
                                         isFriend = false,
+                                        isPendingSent = alreadyRequested,
                                         isFollowing = player.userId in followingIds,
                                         onViewProfile = { selectedUserProfile = player },
                                         onFollow = { viewModel.toggleFollow(player) },
-                                        onAddOrMessage = { viewModel.sendFriendRequest(player) },
+                                        onAddOrMessage = {
+                                            if (!alreadyRequested) {
+                                                viewModel.sendFriendRequest(player)
+                                            }
+                                        },
                                         onReport = { reportingTarget = player.userId to player.handle },
                                         onBlock = { viewModel.toggleBlockUser(player.userId, player.handle) }
                                     )
@@ -286,7 +499,7 @@ fun SocialScreen(
                     else -> {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(bottom = 24.dp)
+                            contentPadding = PaddingValues(bottom = 88.dp)
                         ) {
                             if (communities.isEmpty()) {
                                 item {
@@ -310,6 +523,57 @@ fun SocialScreen(
                 }
             }
         }
+    }
+
+    if (showPartyInviteSheet) {
+        InviteFriendsToPartySheet(
+            friends = friendsProfiles,
+            activeParties = allParties,
+            pendingSentInvites = outgoingPartyInvites,
+            currentUserId = viewModel.currentUserId,
+            initialFriend = preselectedFriendForInvite,
+            onDismiss = {
+                showPartyInviteSheet = false
+                preselectedFriendForInvite = null
+            },
+            onInviteToExistingParty = { party, invitees ->
+                viewModel.inviteFriendsToParty(invitees, party)
+                showPartyInviteSheet = false
+                preselectedFriendForInvite = null
+            },
+            onCreatePartyAndInvite = { partyName, gameTitle, maxSlots, invitees ->
+                viewModel.createPartyAndInviteFriends(partyName, gameTitle, maxSlots, invitees) {
+                    showPartyInviteSheet = false
+                    preselectedFriendForInvite = null
+                }
+            }
+        )
+    }
+
+    if (friendPendingRemoval != null) {
+        val (targetFriend, req) = friendPendingRemoval!!
+        AlertDialog(
+            onDismissRequest = { friendPendingRemoval = null },
+            title = { Text("Remove ${targetFriend.displayName}?") },
+            text = {
+                Text("Remove @${targetFriend.handle} from your friends list? You can always send a new friend request later.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.removeFriend(req.id, targetFriend.displayName)
+                        friendPendingRemoval = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralLive, contentColor = Color.White),
+                    modifier = Modifier.testTag("confirm_remove_friend_button")
+                ) {
+                    Text("Remove")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { friendPendingRemoval = null }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showNewChatDialog) {
@@ -366,6 +630,7 @@ fun SocialScreen(
 private fun PlayerSocialRow(
     profile: UserProfile,
     isFriend: Boolean,
+    isPendingSent: Boolean,
     isFollowing: Boolean,
     onViewProfile: () -> Unit,
     onFollow: () -> Unit,
@@ -388,13 +653,7 @@ private fun PlayerSocialRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            AvatarFace(
-                avatarStyle = profile.avatarStyle,
-                photoUri = profile.avatarPhotoUri,
-                size = 44.dp,
-                isLive = profile.liveNow,
-                showVerified = profile.verifiedBadge
-            )
+            AvatarWithOnlineDot(profile = profile, sizeDp = 44)
             Column(modifier = Modifier.weight(1f)) {
                 val statusSpec = statusVisualSpec(profile.resolvedStatusKey())
                 Text(profile.displayName, style = MaterialTheme.typography.titleSmall, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -411,7 +670,7 @@ private fun PlayerSocialRow(
                     Text(
                         text = "@${profile.handle} • ${statusSpec.label} • LV ${profile.level}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
+                        color = statusSpec.color,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -420,8 +679,17 @@ private fun PlayerSocialRow(
             TextButton(onClick = onFollow) {
                 Text(if (isFollowing) "Following" else "Follow", color = CyanNeon)
             }
-            FilledTonalButton(onClick = onAddOrMessage) {
-                Text(if (isFriend) "Message" else "Add")
+            FilledTonalButton(
+                onClick = onAddOrMessage,
+                enabled = !isPendingSent || isFriend
+            ) {
+                Text(
+                    when {
+                        isFriend -> "Message"
+                        isPendingSent -> "Sent"
+                        else -> "Add"
+                    }
+                )
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) {

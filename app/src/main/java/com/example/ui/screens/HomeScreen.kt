@@ -29,12 +29,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ArcadeViewModel
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +53,9 @@ fun HomeScreen(
     onNavigatePlay: () -> Unit,
     onNavigateProfile: () -> Unit,
     onOpenStream: (String) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    tournamentsState: UiState<List<Tournament>> = UiState.Loading,
+    onNavigateTournaments: () -> Unit = onNavigatePlay
 ) {
     val context = LocalContext.current
     val blockedIds = remember(userPrivate) { userPrivate?.blockedUserIds.orEmpty().toSet() }
@@ -77,6 +81,21 @@ fun HomeScreen(
     var reportingTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var selectedUserProfile by remember { mutableStateOf<UserProfile?>(null) }
     var showStatusSheet by remember { mutableStateOf(false) }
+    var showDailyRewardDialog by remember { mutableStateOf(false) }
+    val isClaimingDailyReward by viewModel.isClaimingDailyReward.collectAsStateWithLifecycle()
+    val upcomingTournament = remember(tournamentsState) {
+        (tournamentsState as? UiState.Success)?.data.orEmpty()
+            .firstOrNull { it.tournamentState == "upcoming" }
+    }
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(upcomingTournament?.id) {
+        if (upcomingTournament != null) {
+            while (true) {
+                nowMillis = System.currentTimeMillis()
+                delay(1000L)
+            }
+        }
+    }
 
     val myStatusKey = remember(myProfile, userPrivate) {
         when {
@@ -270,7 +289,9 @@ fun HomeScreen(
             // Quick Actions Row
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Max),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     QuickActionTile(
@@ -278,29 +299,100 @@ fun HomeScreen(
                         label = "Go Live",
                         accent = CoralLive,
                         onClick = onNavigateWatch,
-                        modifier = Modifier.weight(1f).testTag("quick_go_live")
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("quick_go_live")
                     )
                     QuickActionTile(
                         icon = Icons.Rounded.WifiTethering,
                         label = "Host LAN",
                         accent = VoltGreen,
                         onClick = onNavigatePlay,
-                        modifier = Modifier.weight(1f).testTag("quick_host_lan")
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("quick_host_lan")
                     )
-                    QuickActionTile(
-                        icon = Icons.Rounded.CardGiftcard,
-                        label = "Daily Gift",
-                        accent = GoldCoin,
-                        onClick = { viewModel.claimDailyReward() },
-                        modifier = Modifier.weight(1f).testTag("quick_daily_gift")
+                    DailyGiftQuickTile(
+                        userPrivate = userPrivate,
+                        onClick = { canClaim ->
+                            if (canClaim) {
+                                viewModel.claimDailyReward()
+                            } else {
+                                showDailyRewardDialog = true
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("quick_daily_gift")
                     )
                     QuickActionTile(
                         icon = Icons.Rounded.HeadsetMic,
                         label = "Party",
                         accent = CyanNeon,
                         onClick = onNavigatePlay,
-                        modifier = Modifier.weight(1f).testTag("quick_party")
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("quick_party")
                     )
+                }
+            }
+
+            if (upcomingTournament != null) {
+                item(key = "home_tournament_${upcomingTournament.id}") {
+                    val countdown = remember(upcomingTournament, nowMillis) {
+                        upcomingTournament.countdownStatus(nowMillis)
+                    }
+                    val isRegistered = upcomingTournament.registeredIds.contains(viewModel.currentUserId)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable(onClick = onNavigateTournaments)
+                            .testTag("home_upcoming_tournament_banner"),
+                        shape = RoundedCornerShape(18.dp),
+                        color = ObsidianSurface,
+                        border = BorderStroke(1.dp, GoldCoin.copy(alpha = 0.55f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(GoldContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.EmojiEvents, contentDescription = null, tint = GoldCoin)
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = upcomingTournament.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${upcomingTournament.gameTitle} • Starts in ${countdown.formattedCompact}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (countdown.isStartingSoon) CoralLive else GoldCoin,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            FilledTonalButton(onClick = onNavigateTournaments) {
+                                Text(if (isRegistered) "Pass" else "Register")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -506,6 +598,15 @@ fun HomeScreen(
             }
         )
     }
+
+    if (showDailyRewardDialog) {
+        DailyRewardStatusDialog(
+            userPrivate = userPrivate,
+            isClaiming = isClaimingDailyReward,
+            onClaim = { viewModel.claimDailyReward() },
+            onDismiss = { showDailyRewardDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -607,6 +708,67 @@ private fun HeroArcadeBanner(
 }
 
 @Composable
+private fun DailyGiftQuickTile(
+    userPrivate: UserPrivate?,
+    onClick: (canClaim: Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val lastClaimMs = userPrivate?.lastDailyClaimAt?.toDate()?.time
+    var nowMillis by remember(lastClaimMs) { mutableLongStateOf(System.currentTimeMillis()) }
+    val status = remember(lastClaimMs, nowMillis) {
+        ArcadeCatalog.dailyRewardStatus(lastClaimMs, nowMillis)
+    }
+
+    LaunchedEffect(lastClaimMs, status.canClaim) {
+        if (!status.canClaim) {
+            while (true) {
+                delay(1000L)
+                val updated = System.currentTimeMillis()
+                nowMillis = updated
+                if (ArcadeCatalog.dailyRewardStatus(lastClaimMs, updated).canClaim) break
+            }
+        }
+    }
+
+    val accent = if (status.canClaim) GoldCoin else CyanNeon
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onClick(status.canClaim) },
+        shape = RoundedCornerShape(16.dp),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, accent.copy(alpha = if (status.canClaim) 0.6f else 0.35f))
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = if (status.canClaim) Icons.Rounded.CardGiftcard else Icons.Rounded.Schedule,
+                contentDescription = "Daily Gift",
+                tint = accent,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Daily Gift",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextPrimary,
+                maxLines = 1
+            )
+            Text(
+                text = if (status.canClaim) "Ready!" else status.formattedShortRemaining,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (status.canClaim) VoltGreen else CyanNeon,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 private fun QuickActionTile(
     icon: ImageVector,
     label: String,
@@ -625,9 +787,10 @@ private fun QuickActionTile(
         Column(
             modifier = Modifier.padding(vertical = 12.dp, horizontal = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.Center
         ) {
             Icon(imageVector = icon, contentDescription = label, tint = accent, modifier = Modifier.size(22.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(text = label, style = MaterialTheme.typography.labelMedium, color = TextPrimary, maxLines = 1)
         }
     }

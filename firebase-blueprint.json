@@ -245,10 +245,31 @@
         "tournamentState": { "type": "string", "enum": ["upcoming", "active", "completed"] },
         "registeredIds": { "type": "array" },
         "scheduleLabel": { "type": "string" },
+        "startsAtMillis": { "type": "integer" },
+        "formatLabel": { "type": "string" },
+        "rulesSummary": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["organizerId", "title", "gameTitle", "prizeCoins", "entryCoins", "maxTeams", "tournamentState", "registeredIds", "scheduleLabel", "createdAt", "updatedAt"]
+    },
+    "TournamentRegistration": {
+      "title": "TournamentRegistration",
+      "description": "Player or team registration entry for an upcoming gaming tournament.",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string" },
+        "userId": { "type": "string" },
+        "playerName": { "type": "string" },
+        "teamName": { "type": "string" },
+        "gamerTag": { "type": "string" },
+        "division": { "type": "string", "enum": ["Solo", "Duo", "Squad"] },
+        "agreedRules": { "type": "boolean" },
+        "entryPaidCoins": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tournamentId", "userId", "playerName", "teamName", "gamerTag", "division", "agreedRules", "entryPaidCoins", "createdAt", "updatedAt"]
     },
     "FriendRequest": {
       "title": "FriendRequest",
@@ -266,6 +287,26 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["senderId", "senderName", "senderAvatar", "receiverId", "receiverName", "participantIds", "status", "createdAt", "updatedAt"]
+    },
+    "PartyInvite": {
+      "title": "PartyInvite",
+      "description": "Invitation sent to a friend to join a multiplayer party room.",
+      "type": "object",
+      "properties": {
+        "partyId": { "type": "string" },
+        "partyName": { "type": "string" },
+        "gameTitle": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderAvatar": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "receiverName": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["partyId", "partyName", "gameTitle", "senderId", "senderName", "senderAvatar", "receiverId", "receiverName", "participantIds", "status", "createdAt", "updatedAt"]
     },
     "Conversation": {
       "title": "Conversation",
@@ -366,9 +407,17 @@
       "schema": { "$ref": "#/entities/Tournament" },
       "description": "Esports tournaments."
     },
+    "/tournaments/{tournamentId}/registrations/{userId}": {
+      "schema": { "$ref": "#/entities/TournamentRegistration" },
+      "description": "Tournament registration entries."
+    },
     "/friend_requests/{requestId}": {
       "schema": { "$ref": "#/entities/FriendRequest" },
       "description": "Friend requests and friendships."
+    },
+    "/party_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/PartyInvite" },
+      "description": "Multiplayer party invitations between friends."
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },

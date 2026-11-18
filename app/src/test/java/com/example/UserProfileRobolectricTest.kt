@@ -5,16 +5,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import com.example.data.PlayerStatusOption
+import com.example.data.UserPrivate
 import com.example.data.UserProfile
 import com.example.data.formattedJoinDate
 import com.example.data.unwrapFirestoreMessage
 import com.example.ui.auth.GoogleSignInButton
+import com.example.ui.components.DailyRewardSectionCard
+import com.example.ui.components.LevelProgressionCard
 import com.example.ui.components.ProfileStatusButton
 import com.example.ui.components.StatusPickerBottomSheet
 import com.example.ui.components.UserProfileCard
@@ -228,5 +233,93 @@ class UserProfileRobolectricTest {
         composeTestRule.waitForIdle()
 
         assertEquals(PlayerStatusOption.IN_GAME, selected)
+    }
+
+    @Test
+    fun `dailyRewardSectionCard enables claim when never claimed`() {
+        var claims = 0
+        composeTestRule.setContent {
+            MobiliveArcadeTheme(darkTheme = true) {
+                DailyRewardSectionCard(
+                    userPrivate = UserPrivate(
+                        userId = "u1",
+                        streakDays = 0L,
+                        lastClaimDayIndex = 0L,
+                        lastDailyClaimAt = null
+                    ),
+                    isClaiming = false,
+                    onClaim = { claims++ }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("daily_reward_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_reward_last_claimed")
+            .assertIsDisplayed()
+            .assertTextContains("Not claimed yet", substring = true)
+        composeTestRule.onNodeWithTag("daily_reward_countdown")
+            .assertIsDisplayed()
+            .assertTextContains("Bonus ready", substring = true)
+        composeTestRule.onNodeWithTag("claim_daily_coins_button")
+            .assertIsEnabled()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(1, claims)
+    }
+
+    @Test
+    fun `dailyRewardSectionCard disables claim and shows countdown within 24 hours`() {
+        val twoHoursAgo = Date(System.currentTimeMillis() - (2L * 60L * 60L * 1000L))
+        var claims = 0
+        composeTestRule.setContent {
+            MobiliveArcadeTheme(darkTheme = true) {
+                DailyRewardSectionCard(
+                    userPrivate = UserPrivate(
+                        userId = "u1",
+                        streakDays = 3L,
+                        lastClaimDayIndex = 3L,
+                        lastDailyClaimAt = Timestamp(twoHoursAgo)
+                    ),
+                    isClaiming = false,
+                    onClaim = { claims++ }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("daily_reward_countdown")
+            .assertIsDisplayed()
+            .assertTextContains("Next bonus in", substring = true)
+        composeTestRule.onNodeWithTag("claim_daily_coins_button")
+            .assertIsNotEnabled()
+            .assertTextContains("Come back in", substring = true)
+        assertEquals(0, claims)
+    }
+
+    @Test
+    fun `levelProgressionCard displays tier xp progress and boost`() {
+        composeTestRule.setContent {
+            MobiliveArcadeTheme(darkTheme = true) {
+                LevelProgressionCard(
+                    userPrivate = UserPrivate(
+                        userId = "u1",
+                        xp = 600L,
+                        level = 3L,
+                        activeBuffs = listOf("STARTER_XP_10", "XP_BOOST_20")
+                    )
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("level_progression_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("level_progression_title")
+            .assertIsDisplayed()
+            .assertTextContains("LV 3 • Coin Tactician", substring = true)
+        composeTestRule.onNodeWithTag("level_progression_xp")
+            .assertIsDisplayed()
+            .assertTextContains("100 / 250 XP", substring = true)
     }
 }

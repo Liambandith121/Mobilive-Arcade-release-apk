@@ -44,7 +44,8 @@ fun WatchScreen(
     streamsState: UiState<List<LiveStream>>,
     postsState: UiState<List<SocialPost>>,
     selectedStreamId: String?,
-    onSelectStream: (String?) -> Unit
+    onSelectStream: (String?) -> Unit,
+    onFloatStream: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val blockedIds = remember(userPrivate) { userPrivate?.blockedUserIds.orEmpty().toSet() }
@@ -82,6 +83,7 @@ fun WatchScreen(
             userPrivate = userPrivate,
             isHost = activeStream.hostId == viewModel.currentUserId,
             onBack = { onSelectStream(null) },
+            onFloat = { onFloatStream(activeStream.id) },
             onOpenManager = { showStreamManager = true }
         )
     } else {
@@ -483,6 +485,7 @@ private fun StreamPlayerView(
     userPrivate: UserPrivate?,
     isHost: Boolean,
     onBack: () -> Unit,
+    onFloat: () -> Unit,
     onOpenManager: () -> Unit
 ) {
     val chatState by viewModel.selectedStreamChat.collectAsStateWithLifecycle()
@@ -506,6 +509,16 @@ private fun StreamPlayerView(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onFloat,
+                        modifier = Modifier.testTag("float_stream_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PictureInPictureAlt,
+                            contentDescription = "Float stream",
+                            tint = CyanNeon
+                        )
+                    }
                     if (isHost && stream.streamStatus == "live") {
                         FilledTonalButton(onClick = onOpenManager, modifier = Modifier.testTag("stream_manager_btn")) {
                             Text("Stream Manager")
@@ -653,7 +666,7 @@ private fun StreamPlayerView(
 }
 
 @Composable
-private fun GoLiveSetupDialog(
+internal fun GoLiveSetupDialog(
     onDismiss: () -> Unit,
     onStartLive: (title: String, game: String, recordReplay: Boolean) -> Unit
 ) {
@@ -702,7 +715,7 @@ private fun GoLiveSetupDialog(
 }
 
 @Composable
-private fun StreamManagerDialog(
+internal fun StreamManagerDialog(
     stream: LiveStream,
     onDismiss: () -> Unit,
     onSaveControls: (mic: Boolean, slow: Long, replay: Boolean, title: String) -> Unit,
@@ -767,7 +780,7 @@ private fun StreamManagerDialog(
 }
 
 @Composable
-private fun LiveElapsedBadge(
+internal fun LiveElapsedBadge(
     streamId: String,
     streamStatus: String,
     initialDurationSec: Long

@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.*
 import com.example.ui.components.*
@@ -66,6 +67,7 @@ fun ProfileScreen(
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showUploadMediaDialog by remember { mutableStateOf(false) }
     var showStatusSheet by remember { mutableStateOf(false) }
+    val isClaimingDailyReward by viewModel.isClaimingDailyReward.collectAsStateWithLifecycle()
 
     val resolvedStatusKey = remember(myProfile, userPrivate) {
         when {
@@ -79,10 +81,9 @@ fun ProfileScreen(
         if (openSettingsInitially) selectedSection = 3
     }
 
-    val level = userPrivate?.level ?: 1L
-    val xp = userPrivate?.xp ?: 0L
-    val nextLevelXp = ArcadeCatalog.xpForNextLevel(level)
-    val levelProgress = ((xp % 250L).toFloat() / 250f).coerceIn(0f, 1f)
+    val progress = remember(userPrivate) { userPrivate.levelProgress() }
+    val level = progress.level
+    val xp = progress.totalXp
 
     Scaffold(
         containerColor = ObsidianBg,
@@ -239,17 +240,29 @@ fun ProfileScreen(
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        LevelBadge(level = level)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            LevelBadge(level = progress.level)
+                                            Text(
+                                                text = progress.tier.title,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = CyanNeon,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
                                         Text(
-                                            text = "$xp / $nextLevelXp XP",
+                                            text = "${progress.xpIntoCurrentLevel} / ${progress.xpRequiredForLevel} XP • ${progress.totalXp} Total",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = VoltGreen
                                         )
                                     }
                                     LinearProgressIndicator(
-                                        progress = { levelProgress },
+                                        progress = { progress.progressFraction },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(10.dp)
@@ -281,67 +294,18 @@ fun ProfileScreen(
 
             when (selectedSection) {
                 0 -> {
-                    // 7-Day Gift Coins Daily Claim
+                    // Gamified Level & XP Progression Tracker
                     item {
-                        val claimedIdx = (userPrivate?.lastClaimDayIndex ?: 0L).toInt()
-                        val nextDay = (claimedIdx % 7) + 1
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(20.dp),
-                            color = ObsidianSurface,
-                            border = BorderStroke(1.dp, GoldCoin.copy(alpha = 0.45f))
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text("Gift Coins • Days Claim", style = MaterialTheme.typography.titleMedium, color = GoldCoin)
-                                        Text("Claim daily rewards to level up & unlock Buffs", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                                    }
-                                    Button(
-                                        onClick = { viewModel.claimDailyReward() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = GoldCoin, contentColor = ObsidianBg),
-                                        modifier = Modifier.testTag("claim_daily_coins_button")
-                                    ) {
-                                        Text("Claim Day $nextDay", fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                        LevelProgressionCard(userPrivate = userPrivate)
+                    }
 
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(ArcadeCatalog.dailyRewards, key = { it.day }) { day ->
-                                        val isDone = day.day <= claimedIdx
-                                        val isCurrent = day.day == nextDay
-                                        Surface(
-                                            shape = RoundedCornerShape(14.dp),
-                                            color = when {
-                                                isCurrent -> GoldContainer
-                                                isDone -> VoltGreenContainer
-                                                else -> ObsidianSurfaceElevated
-                                            },
-                                            border = if (isCurrent) BorderStroke(1.5.dp, GoldCoin) else null
-                                        ) {
-                                            Column(
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                                horizontalAlignment = Alignment.CenterHorizontally
-                                            ) {
-                                                Text("Day ${day.day}", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                                                Text("+${day.coins}", style = MaterialTheme.typography.titleSmall, color = GoldCoin)
-                                                Text("+${day.xp} XP", style = MaterialTheme.typography.labelSmall, color = VoltGreen)
-                                                if (day.buffLabel != null) {
-                                                    Text("BUFF", style = MaterialTheme.typography.labelSmall, color = CyanNeon)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    // 7-Day Gift Coins Daily Claim (24h Firestore cooldown)
+                    item {
+                        DailyRewardSectionCard(
+                            userPrivate = userPrivate,
+                            isClaiming = isClaimingDailyReward,
+                            onClaim = { viewModel.claimDailyReward() }
+                        )
                     }
 
                     // Level Up Buff Rewards

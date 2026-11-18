@@ -65,3 +65,47 @@ fun UserProfile.formattedJoinDate(): String {
     val date = createdAt?.toDate() ?: return "Just joined"
     return SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(date)
 }
+
+fun UserProfile.isOnlineOrActive(): Boolean =
+    liveNow || PlayerStatusOption.fromKey(playerStatus) != PlayerStatusOption.AWAY
+
+fun UserProfile.statusSortPriority(): Int = when (resolvedStatusKey()) {
+    "live" -> 0
+    PlayerStatusOption.LFG.key -> 1
+    PlayerStatusOption.IN_GAME.key -> 2
+    PlayerStatusOption.ONLINE.key -> 3
+    else -> 4
+}
+
+enum class FriendStatusFilter(val label: String) {
+    ALL("All"),
+    ONLINE("Online"),
+    IN_GAME("In-Game"),
+    LFG("Squad Ready");
+
+    fun matches(profile: UserProfile): Boolean = when (this) {
+        ALL -> true
+        ONLINE -> profile.isOnlineOrActive()
+        IN_GAME -> profile.resolvedStatusKey() == PlayerStatusOption.IN_GAME.key || profile.liveNow
+        LFG -> profile.resolvedStatusKey() == PlayerStatusOption.LFG.key
+    }
+}
+
+fun List<UserProfile>.filterAndSortFriends(
+    query: String,
+    filter: FriendStatusFilter
+): List<UserProfile> {
+    val q = query.trim().lowercase()
+    return filter { profile ->
+        filter.matches(profile) && (
+            q.isEmpty() ||
+                profile.displayName.lowercase().contains(q) ||
+                profile.handle.lowercase().contains(q) ||
+                profile.currentGame.lowercase().contains(q)
+            )
+    }.sortedWith(
+        compareBy<UserProfile> { it.statusSortPriority() }
+            .thenBy { it.displayName.lowercase() }
+    )
+}
+

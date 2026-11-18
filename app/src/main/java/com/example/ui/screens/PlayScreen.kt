@@ -1,9 +1,6 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +32,7 @@ import com.example.data.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ArcadeViewModel
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,21 +42,87 @@ fun PlayScreen(
     partiesState: UiState<List<PartyRoom>>,
     communitiesState: UiState<List<GameCommunity>>,
     tournamentsState: UiState<List<Tournament>>,
-    onShowMessage: (String) -> Unit
+    onShowMessage: (String) -> Unit,
+    profilesState: UiState<List<UserProfile>> = UiState.Loading,
+    friendRequestsState: UiState<List<FriendRequest>> = UiState.Loading,
+    partyInvitesState: UiState<List<PartyInvite>> = UiState.Loading,
+    jumpToPartyVoiceToken: Int = 0,
+    userPrivate: UserPrivate? = null,
+    myProfile: UserProfile? = null,
+    selectedTournamentRegistrationsState: UiState<List<TournamentRegistration>> = UiState.Loading,
+    isSubmittingTournamentRegistration: Boolean = false,
+    jumpToTournamentsToken: Int = 0
 ) {
     val context = LocalContext.current
     val worlds = remember(worldsState) { (worldsState as? UiState.Success)?.data.orEmpty() }
     val parties = remember(partiesState) { (partiesState as? UiState.Success)?.data.orEmpty() }
     val communities = remember(communitiesState) { (communitiesState as? UiState.Success)?.data.orEmpty() }
     val tournaments = remember(tournamentsState) { (tournamentsState as? UiState.Success)?.data.orEmpty() }
+    val allProfiles = remember(profilesState, viewModel.currentUserId) {
+        (profilesState as? UiState.Success)?.data.orEmpty().filter { it.userId != viewModel.currentUserId }
+    }
+    val friendIds = remember(friendRequestsState, viewModel.currentUserId) {
+        (friendRequestsState as? UiState.Success)?.data.orEmpty()
+            .filter { it.status == "accepted" }
+            .map { if (it.senderId == viewModel.currentUserId) it.receiverId else it.senderId }
+            .toSet()
+    }
+    val friendsProfiles = remember(allProfiles, friendIds) {
+        allProfiles.filter { it.userId in friendIds }
+            .sortedWith(compareBy<UserProfile> { it.statusSortPriority() }.thenBy { it.displayName.lowercase() })
+    }
+    val allPartyInvites = remember(partyInvitesState) { (partyInvitesState as? UiState.Success)?.data.orEmpty() }
+    val incomingPartyInvites = remember(allPartyInvites, viewModel.currentUserId) {
+        allPartyInvites.filter { it.status == "pending" && it.receiverId == viewModel.currentUserId }
+    }
+    val outgoingPartyInvites = remember(allPartyInvites, viewModel.currentUserId) {
+        allPartyInvites.filter { it.status == "pending" && it.senderId == viewModel.currentUserId }
+    }
 
     var selectedSection by remember { mutableIntStateOf(0) } // 0=LAN Lobby, 1=Party & Voice, 2=Tournaments & Clubs
     var showHostWorldDialog by remember { mutableStateOf(false) }
     var joiningWorldModal by remember { mutableStateOf<MultiplayerWorld?>(null) }
     var showCreatePartyDialog by remember { mutableStateOf(false) }
+    var inviteTargetParty by remember { mutableStateOf<PartyRoom?>(null) }
+    var showInviteSheet by remember { mutableStateOf(false) }
     var showCreateTournamentDialog by remember { mutableStateOf(false) }
     var showCreateCommunityDialog by remember { mutableStateOf(false) }
     var pendingVoiceParty by remember { mutableStateOf<PartyRoom?>(null) }
+    var tournamentFilter by remember { mutableStateOf("All") }
+    var selectedTournamentIdForRegistration by remember { mutableStateOf<String?>(null) }
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    val selectedTournamentForRegistration = remember(tournaments, selectedTournamentIdForRegistration) {
+        tournaments.firstOrNull { it.id == selectedTournamentIdForRegistration }
+    }
+    val selectedTournamentRegistrations = remember(selectedTournamentRegistrationsState) {
+        (selectedTournamentRegistrationsState as? UiState.Success)?.data.orEmpty()
+    }
+
+    LaunchedEffect(selectedSection, tournaments.size, selectedTournamentIdForRegistration) {
+        if (selectedSection == 2 || selectedTournamentIdForRegistration != null) {
+            while (true) {
+                nowMillis = System.currentTimeMillis()
+                delay(1000L)
+            }
+        }
+    }
+
+    LaunchedEffect(selectedTournamentIdForRegistration) {
+        viewModel.selectTournament(selectedTournamentIdForRegistration)
+    }
+
+    LaunchedEffect(jumpToPartyVoiceToken) {
+        if (jumpToPartyVoiceToken > 0) {
+            selectedSection = 1
+        }
+    }
+
+    LaunchedEffect(jumpToTournamentsToken) {
+        if (jumpToTournamentsToken > 0) {
+            selectedSection = 2
+        }
+    }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -165,15 +229,28 @@ fun PlayScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
+                        if (incomingPartyInvites.isNotEmpty()) {
+                            item {
+                                Text("Party Invitations (${incomingPartyInvites.size})", style = MaterialTheme.typography.titleMedium, color = CyanNeon)
+                            }
+                            items(incomingPartyInvites, key = { "play_pi_${it.id}" }) { invite ->
+                                PartyInviteBannerCard(
+                                    invite = invite,
+                                    onAccept = { viewModel.respondPartyInvite(invite, true) },
+                                    onDecline = { viewModel.respondPartyInvite(invite, false) }
+                                )
+                            }
+                        }
+
                         item {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text("Party System & Voice Chat", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                    Text("Squad voice rooms + instant matchmaking queue", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                    Text("Squad voice rooms + invite online friends", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                                 }
                                 Button(
                                     onClick = { showCreatePartyDialog = true },
@@ -190,7 +267,7 @@ fun PlayScreen(
                                 EmptyArcadeState(
                                     icon = Icons.Rounded.HeadsetMic,
                                     title = "No active Voice Parties",
-                                    subtitle = "Create a party room to chat over voice and queue into matchmaking.",
+                                    subtitle = "Create a party room to chat over voice and invite your friends.",
                                     actionLabel = "Start Party Voice",
                                     onAction = { showCreatePartyDialog = true }
                                 )
@@ -217,7 +294,11 @@ fun PlayScreen(
                                             viewModel.togglePartyMicMute(party)
                                         }
                                     },
-                                    onToggleMatchmaking = { viewModel.toggleMatchmaking(party) }
+                                    onToggleMatchmaking = { viewModel.toggleMatchmaking(party) },
+                                    onInviteFriends = {
+                                        inviteTargetParty = party
+                                        showInviteSheet = true
+                                    }
                                 )
                             }
                         }
@@ -225,6 +306,20 @@ fun PlayScreen(
                 }
 
                 else -> {
+                    val featuredUpcoming = remember(tournaments, nowMillis) {
+                        tournaments.firstOrNull {
+                            it.countdownStatus(nowMillis).phase == TournamentPhase.UPCOMING
+                        }
+                    }
+                    val filteredTournaments = remember(tournaments, tournamentFilter, nowMillis, viewModel.currentUserId) {
+                        when (tournamentFilter) {
+                            "Upcoming" -> tournaments.filter { it.countdownStatus(nowMillis).phase == TournamentPhase.UPCOMING }
+                            "Registered" -> tournaments.filter { it.registeredIds.contains(viewModel.currentUserId) }
+                            "Live" -> tournaments.filter { it.countdownStatus(nowMillis).phase == TournamentPhase.LIVE }
+                            else -> tournaments
+                        }
+                    }
+
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
@@ -235,29 +330,61 @@ fun PlayScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Tournaments", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                TextButton(onClick = { showCreateTournamentDialog = true }) {
-                                    Text("+ Host Tournament", color = GoldCoin)
+                                Text("Tournaments & Events", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                TextButton(
+                                    onClick = { showCreateTournamentDialog = true },
+                                    modifier = Modifier.testTag("host_tournament_button")
+                                ) {
+                                    Text("+ Host Tournament", color = GoldCoin, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
 
-                        if (tournaments.isEmpty()) {
+                        if (featuredUpcoming != null) {
+                            item(key = "spotlight_${featuredUpcoming.id}") {
+                                TournamentSpotlightCard(
+                                    tournament = featuredUpcoming,
+                                    nowMillis = nowMillis,
+                                    isRegistered = featuredUpcoming.registeredIds.contains(viewModel.currentUserId),
+                                    onOpenRegistration = { selectedTournamentIdForRegistration = featuredUpcoming.id }
+                                )
+                            }
+                        }
+
+                        item {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(listOf("All", "Upcoming", "Registered", "Live"), key = { it }) { filter ->
+                                    FilterChip(
+                                        selected = tournamentFilter == filter,
+                                        onClick = { tournamentFilter = filter },
+                                        label = { Text(filter) },
+                                        modifier = Modifier.testTag("tournament_filter_${filter.lowercase()}")
+                                    )
+                                }
+                            }
+                        }
+
+                        if (filteredTournaments.isEmpty()) {
                             item {
                                 EmptyArcadeState(
                                     icon = Icons.Rounded.EmojiEvents,
-                                    title = "No tournaments scheduled",
-                                    subtitle = "Launch an arcade tournament with Gift Coin prize pools!",
-                                    actionLabel = "Create Tournament",
+                                    title = if (tournaments.isEmpty()) "No tournaments scheduled" else "No matching tournaments",
+                                    subtitle = if (tournaments.isEmpty()) {
+                                        "Launch an upcoming gaming tournament with a live countdown and prize pool!"
+                                    } else {
+                                        "Try switching the filter or host a new upcoming event."
+                                    },
+                                    actionLabel = "Host Tournament",
                                     onAction = { showCreateTournamentDialog = true }
                                 )
                             }
                         } else {
-                            items(tournaments, key = { it.id }) { t ->
+                            items(filteredTournaments, key = { it.id }) { t ->
                                 TournamentCard(
                                     tournament = t,
+                                    nowMillis = nowMillis,
                                     isRegistered = t.registeredIds.contains(viewModel.currentUserId),
-                                    onToggleRegister = { viewModel.toggleRegisterTournament(t) }
+                                    onOpenRegistration = { selectedTournamentIdForRegistration = t.id }
                                 )
                             }
                         }
@@ -302,10 +429,9 @@ fun PlayScreen(
 
     if (showHostWorldDialog) {
         HostWorldDialog(
-            loadDefaultLan = { viewModel.detectLocalLanIpAsync() },
             onDismiss = { showHostWorldDialog = false },
-            onHost = { name, game, mode, lan, max ->
-                viewModel.hostWorld(name, game, mode, lan, max)
+            onHost = { name, game, mode, max ->
+                viewModel.hostWorld(name, game, mode, max)
                 showHostWorldDialog = false
             }
         )
@@ -313,58 +439,17 @@ fun PlayScreen(
 
     if (joiningWorldModal != null) {
         val world = joiningWorldModal!!
-        AlertDialog(
-            onDismissRequest = { joiningWorldModal = null },
-            title = { Text("Ready to Join ${world.worldName}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Surface(shape = RoundedCornerShape(12.dp), color = VoltGreenContainer) {
-                        Text(
-                            text = stringResource(R.string.lan_joining_instruction),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = VoltGreen,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-                    Surface(shape = RoundedCornerShape(12.dp), color = ObsidianSurfaceElevated) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text("LAN Address", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                                Text(world.lanAddress, style = MaterialTheme.typography.titleSmall, color = CyanNeon)
-                            }
-                            IconButton(onClick = {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("LAN Address", world.lanAddress))
-                                onShowMessage("Copied ${world.lanAddress}")
-                            }) {
-                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy LAN IP", tint = CyanNeon)
-                            }
-                        }
-                    }
+        JoinWorldDialog(
+            world = world,
+            onDismiss = { joiningWorldModal = null },
+            onOpenMinecraft = {
+                val launchIntent = context.packageManager.getLaunchIntentForPackage("com.mojang.minecraftpe")
+                if (launchIntent != null) {
+                    context.startActivity(launchIntent)
+                } else {
+                    onShowMessage("Minecraft app not detected on this device. Open Minecraft > Play > Worlds manually!")
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val launchIntent = context.packageManager.getLaunchIntentForPackage("com.mojang.minecraftpe")
-                        if (launchIntent != null) {
-                            context.startActivity(launchIntent)
-                        } else {
-                            onShowMessage("Minecraft app not detected on this device. Open Minecraft > Play > Worlds manually!")
-                        }
-                        joiningWorldModal = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = VoltGreen, contentColor = ObsidianBg)
-                ) {
-                    Text("Open Minecraft", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { joiningWorldModal = null }) { Text("Done") }
+                joiningWorldModal = null
             }
         )
     }
@@ -382,9 +467,49 @@ fun PlayScreen(
     if (showCreateTournamentDialog) {
         CreateTournamentDialog(
             onDismiss = { showCreateTournamentDialog = false },
-            onCreate = { title, game, prize, entry, teams, schedule ->
-                viewModel.createTournament(title, game, prize, entry, teams, schedule)
+            onCreate = { title, game, prize, entry, teams, schedule, startsAtMillis, formatLabel, rulesSummary ->
+                viewModel.createTournament(
+                    title = title,
+                    gameTitle = game,
+                    prizeCoins = prize,
+                    entryCoins = entry,
+                    maxTeams = teams,
+                    schedule = schedule,
+                    startsAtMillis = startsAtMillis,
+                    formatLabel = formatLabel,
+                    rulesSummary = rulesSummary
+                )
                 showCreateTournamentDialog = false
+            }
+        )
+    }
+
+    if (selectedTournamentForRegistration != null) {
+        TournamentRegistrationSheet(
+            tournament = selectedTournamentForRegistration,
+            nowMillis = nowMillis,
+            currentUserId = viewModel.currentUserId,
+            userPrivate = userPrivate,
+            myProfile = myProfile,
+            registrations = selectedTournamentRegistrations,
+            isSubmitting = isSubmittingTournamentRegistration,
+            onDismiss = { selectedTournamentIdForRegistration = null },
+            onConfirmRegister = { teamName, gamerTag, division ->
+                viewModel.registerForTournament(
+                    tournament = selectedTournamentForRegistration,
+                    teamName = teamName,
+                    gamerTag = gamerTag,
+                    division = division
+                )
+            },
+            onWithdrawRegistration = { paidCoins ->
+                viewModel.withdrawTournamentRegistration(
+                    tournament = selectedTournamentForRegistration,
+                    entryPaidCoins = paidCoins
+                )
+            },
+            onUpdateTournamentState = { nextState ->
+                viewModel.updateTournamentState(selectedTournamentForRegistration.id, nextState)
             }
         )
     }
@@ -398,17 +523,44 @@ fun PlayScreen(
             }
         )
     }
+
+    if (showInviteSheet) {
+        InviteFriendsToPartySheet(
+            friends = friendsProfiles,
+            activeParties = parties,
+            pendingSentInvites = outgoingPartyInvites,
+            currentUserId = viewModel.currentUserId,
+            initialParty = inviteTargetParty,
+            onDismiss = {
+                showInviteSheet = false
+                inviteTargetParty = null
+            },
+            onInviteToExistingParty = { party, invitees ->
+                viewModel.inviteFriendsToParty(invitees, party)
+                showInviteSheet = false
+                inviteTargetParty = null
+            },
+            onCreatePartyAndInvite = { partyName, gameTitle, maxSlots, invitees ->
+                viewModel.createPartyAndInviteFriends(partyName, gameTitle, maxSlots, invitees) {
+                    showInviteSheet = false
+                    inviteTargetParty = null
+                }
+            }
+        )
+    }
 }
 
 @Composable
-private fun WorldLobbyCard(
+internal fun WorldLobbyCard(
     world: MultiplayerWorld,
     isHost: Boolean,
     onJoinHere: () -> Unit,
     onCloseWorld: () -> Unit
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("world_lobby_card_${world.id}"),
         shape = RoundedCornerShape(18.dp),
         color = ObsidianSurface,
         border = BorderStroke(1.dp, VoltGreen.copy(alpha = 0.45f))
@@ -440,8 +592,41 @@ private fun WorldLobbyCard(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = {}, label = { Text(world.gameMode) })
-                AssistChip(onClick = {}, label = { Text("LAN: ${world.lanAddress}") })
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = ObsidianSurfaceElevated,
+                    border = BorderStroke(1.dp, ObsidianOutline)
+                ) {
+                    Text(
+                        text = world.gameMode,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = VoltGreenContainer.copy(alpha = 0.7f),
+                    border = BorderStroke(1.dp, VoltGreen.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.WifiTethering,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = VoltGreen
+                        )
+                        Text(
+                            text = if (world.lanVisible) "LAN Visible" else "Multiplayer",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = VoltGreen
+                        )
+                    }
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -472,7 +657,8 @@ private fun PartyVoiceCard(
     currentUserId: String,
     onJoinLeave: () -> Unit,
     onToggleMic: () -> Unit,
-    onToggleMatchmaking: () -> Unit
+    onToggleMatchmaking: () -> Unit,
+    onInviteFriends: () -> Unit
 ) {
     val inParty = party.memberIds.contains(currentUserId)
     val isMuted = party.mutedMemberIds.contains(currentUserId)
@@ -579,45 +765,17 @@ private fun PartyVoiceCard(
                     Text(if (inParty) "Leave Party" else "Join Voice", fontWeight = FontWeight.Bold)
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TournamentCard(
-    tournament: Tournament,
-    isRegistered: Boolean,
-    onToggleRegister: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = ObsidianSurface,
-        border = BorderStroke(1.dp, GoldCoin.copy(alpha = 0.45f))
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(tournament.title, style = MaterialTheme.typography.titleMedium, color = TextPrimary, modifier = Modifier.weight(1f))
-                CoinPill(coins = tournament.prizeCoins)
-            }
-            Text(
-                "${tournament.gameTitle} • ${tournament.scheduleLabel} • ${tournament.registeredIds.size}/${tournament.maxTeams} Teams",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
-            )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Button(
-                    onClick = onToggleRegister,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRegistered) VoltGreenContainer else GoldCoin,
-                        contentColor = if (isRegistered) VoltGreen else ObsidianBg
-                    )
+            if (inParty && party.memberIds.size < party.maxSlots.toInt()) {
+                FilledTonalButton(
+                    onClick = onInviteFriends,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("party_invite_friends_${party.id}")
                 ) {
-                    Text(if (isRegistered) "Registered" else "Enter Tournament", fontWeight = FontWeight.Bold)
+                    Icon(Icons.Rounded.GroupAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Invite Friends to Party", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -663,25 +821,81 @@ fun CommunityCard(
 }
 
 @Composable
-private fun HostWorldDialog(
-    loadDefaultLan: suspend () -> String,
+internal fun JoinWorldDialog(
+    world: MultiplayerWorld,
     onDismiss: () -> Unit,
-    onHost: (name: String, game: String, mode: String, lan: String, maxPlayers: Long) -> Unit
+    onOpenMinecraft: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ready to Join ${world.worldName}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(shape = RoundedCornerShape(12.dp), color = VoltGreenContainer) {
+                    Text(
+                        text = stringResource(R.string.lan_joining_instruction),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = VoltGreen,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                Surface(shape = RoundedCornerShape(12.dp), color = ObsidianSurfaceElevated) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Host: ${world.hostName}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "${world.gameName} • ${world.gameMode}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CyanNeon
+                            )
+                        }
+                        Surface(shape = RoundedCornerShape(50), color = VoltGreenContainer) {
+                            Text(
+                                text = "${world.participantIds.size}/${world.maxPlayers}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = VoltGreen,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onOpenMinecraft,
+                colors = ButtonDefaults.buttonColors(containerColor = VoltGreen, contentColor = ObsidianBg),
+                modifier = Modifier.testTag("open_minecraft_button")
+            ) {
+                Text("Open Minecraft", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
+}
+
+@Composable
+internal fun HostWorldDialog(
+    onDismiss: () -> Unit,
+    onHost: (name: String, game: String, mode: String, maxPlayers: Long) -> Unit
 ) {
     var worldName by remember { mutableStateOf("Diamond Sky Realm") }
     var gameName by remember { mutableStateOf("Minecraft") }
     var gameMode by remember { mutableStateOf("Survival") }
-    var lanAddress by remember { mutableStateOf("") }
-    var lanEdited by remember { mutableStateOf(false) }
     var multiplayerChecked by remember { mutableStateOf(true) }
     var lanVisibleChecked by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) {
-        val detected = loadDefaultLan()
-        if (!lanEdited && lanAddress.isBlank()) {
-            lanAddress = detected
-        }
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -710,16 +924,6 @@ private fun HostWorldDialog(
                     label = { Text("World Name") },
                     modifier = Modifier.fillMaxWidth().testTag("host_world_name_input")
                 )
-                OutlinedTextField(
-                    value = lanAddress,
-                    onValueChange = {
-                        lanEdited = true
-                        lanAddress = it.take(80)
-                    },
-                    label = { Text("LAN IP : Port") },
-                    placeholder = { Text("Detecting local LAN IP...") },
-                    modifier = Modifier.fillMaxWidth()
-                )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(listOf("Survival", "Creative", "Adventure", "Minigame"), key = { it }) { m ->
                         FilterChip(selected = gameMode == m, onClick = { gameMode = m }, label = { Text(m) })
@@ -729,7 +933,7 @@ private fun HostWorldDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onHost(worldName, gameName, gameMode, lanAddress, 8L) },
+                onClick = { onHost(worldName, gameName, gameMode, 8L) },
                 enabled = worldName.isNotBlank() && multiplayerChecked && lanVisibleChecked,
                 colors = ButtonDefaults.buttonColors(containerColor = VoltGreen, contentColor = ObsidianBg),
                 modifier = Modifier.testTag("confirm_host_world_button")
@@ -763,35 +967,6 @@ private fun CreatePartyDialog(
         },
         confirmButton = {
             Button(onClick = { onCreate(name, game, 4L) }, enabled = name.isNotBlank()) { Text("Create") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-private fun CreateTournamentDialog(
-    onDismiss: () -> Unit,
-    onCreate: (title: String, game: String, prize: Long, entry: Long, teams: Long, schedule: String) -> Unit
-) {
-    var title by remember { mutableStateOf("Mobilive Weekend Cup") }
-    var game by remember { mutableStateOf("Minecraft") }
-    var prize by remember { mutableStateOf("1000") }
-    var schedule by remember { mutableStateOf("Sat 7:00 PM") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Tournament") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = title, onValueChange = { title = it.take(80) }, label = { Text("Tournament Title") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = game, onValueChange = { game = it.take(50) }, label = { Text("Game") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = prize, onValueChange = { prize = it.filter(Char::isDigit).take(6) }, label = { Text("Prize Pool (Coins)") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = schedule, onValueChange = { schedule = it.take(40) }, label = { Text("Schedule") }, modifier = Modifier.fillMaxWidth())
-            }
-        },
-        confirmButton = {
-            Button(onClick = { onCreate(title, game, prize.toLongOrNull() ?: 500L, 0L, 16L, schedule) }, enabled = title.isNotBlank()) {
-                Text("Launch")
-            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )

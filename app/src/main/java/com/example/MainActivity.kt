@@ -28,9 +28,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.data.LevelTier
 import com.example.data.UiState
 import com.example.ui.auth.AuthScreen
 import com.example.ui.components.CommentsBottomSheet
+import com.example.ui.components.FloatingArcadeOverlay
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ArcadeViewModel
@@ -117,8 +119,11 @@ fun MobiliveArcadeApp(currentUserId: String) {
     val levelUpBanner by viewModel.levelUpBanner.collectAsStateWithLifecycle()
 
     var selectedStreamId by remember { mutableStateOf<String?>(null) }
+    var minimizedStreamId by remember { mutableStateOf<String?>(null) }
     var selectedConversationId by remember { mutableStateOf<String?>(null) }
     var openProfileSettings by remember { mutableStateOf(false) }
+    var jumpToPartyVoiceToken by remember { mutableIntStateOf(0) }
+    var jumpToTournamentsToken by remember { mutableIntStateOf(0) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -250,6 +255,7 @@ fun MobiliveArcadeApp(currentUserId: String) {
                             val streamsState by viewModel.streams.collectAsStateWithLifecycle()
                             val worldsState by viewModel.worlds.collectAsStateWithLifecycle()
                             val notificationsState by viewModel.notifications.collectAsStateWithLifecycle()
+                            val tournamentsState by viewModel.tournaments.collectAsStateWithLifecycle()
                             HomeScreen(
                                 viewModel = viewModel,
                                 userPrivate = (userPrivateState as? UiState.Success)?.data,
@@ -269,6 +275,11 @@ fun MobiliveArcadeApp(currentUserId: String) {
                                 onOpenSettings = {
                                     openProfileSettings = true
                                     navigateTab(ArcadeRoutes.PROFILE)
+                                },
+                                tournamentsState = tournamentsState,
+                                onNavigateTournaments = {
+                                    jumpToTournamentsToken++
+                                    navigateTab(ArcadeRoutes.PLAY)
                                 }
                             )
                         }
@@ -283,22 +294,45 @@ fun MobiliveArcadeApp(currentUserId: String) {
                                 streamsState = streamsState,
                                 postsState = postsState,
                                 selectedStreamId = selectedStreamId,
-                                onSelectStream = { selectedStreamId = it }
+                                onSelectStream = { id ->
+                                    selectedStreamId = id
+                                    if (id != null) minimizedStreamId = null
+                                },
+                                onFloatStream = { id ->
+                                    minimizedStreamId = id
+                                    selectedStreamId = null
+                                }
                             )
                         }
 
                         composable(ArcadeRoutes.PLAY) {
+                            val userPrivateState by viewModel.userPrivate.collectAsStateWithLifecycle()
+                            val myProfileState by viewModel.myProfile.collectAsStateWithLifecycle()
                             val worldsState by viewModel.worlds.collectAsStateWithLifecycle()
                             val partiesState by viewModel.parties.collectAsStateWithLifecycle()
                             val communitiesState by viewModel.communities.collectAsStateWithLifecycle()
                             val tournamentsState by viewModel.tournaments.collectAsStateWithLifecycle()
+                            val allProfilesState by viewModel.allProfiles.collectAsStateWithLifecycle()
+                            val friendRequestsState by viewModel.friendRequests.collectAsStateWithLifecycle()
+                            val partyInvitesState by viewModel.partyInvites.collectAsStateWithLifecycle()
+                            val registrationsState by viewModel.selectedTournamentRegistrations.collectAsStateWithLifecycle()
+                            val isSubmittingReg by viewModel.isSubmittingTournamentRegistration.collectAsStateWithLifecycle()
                             PlayScreen(
                                 viewModel = viewModel,
                                 worldsState = worldsState,
                                 partiesState = partiesState,
                                 communitiesState = communitiesState,
                                 tournamentsState = tournamentsState,
-                                onShowMessage = { msg -> viewModel.showBannerMessage(msg) }
+                                onShowMessage = { msg -> viewModel.showBannerMessage(msg) },
+                                profilesState = allProfilesState,
+                                friendRequestsState = friendRequestsState,
+                                partyInvitesState = partyInvitesState,
+                                jumpToPartyVoiceToken = jumpToPartyVoiceToken,
+                                userPrivate = (userPrivateState as? UiState.Success)?.data,
+                                myProfile = (myProfileState as? UiState.Success)?.data,
+                                selectedTournamentRegistrationsState = registrationsState,
+                                isSubmittingTournamentRegistration = isSubmittingReg,
+                                jumpToTournamentsToken = jumpToTournamentsToken
                             )
                         }
 
@@ -308,6 +342,8 @@ fun MobiliveArcadeApp(currentUserId: String) {
                             val friendRequestsState by viewModel.friendRequests.collectAsStateWithLifecycle()
                             val conversationsState by viewModel.conversations.collectAsStateWithLifecycle()
                             val communitiesState by viewModel.communities.collectAsStateWithLifecycle()
+                            val partiesState by viewModel.parties.collectAsStateWithLifecycle()
+                            val partyInvitesState by viewModel.partyInvites.collectAsStateWithLifecycle()
                             SocialScreen(
                                 viewModel = viewModel,
                                 userPrivate = (userPrivateState as? UiState.Success)?.data,
@@ -316,7 +352,13 @@ fun MobiliveArcadeApp(currentUserId: String) {
                                 conversationsState = conversationsState,
                                 communitiesState = communitiesState,
                                 selectedConversationId = selectedConversationId,
-                                onSelectConversation = { selectedConversationId = it }
+                                onSelectConversation = { selectedConversationId = it },
+                                partiesState = partiesState,
+                                partyInvitesState = partyInvitesState,
+                                onOpenPartyVoice = {
+                                    jumpToPartyVoiceToken++
+                                    navigateTab(ArcadeRoutes.PLAY)
+                                }
                             )
                         }
 
@@ -342,6 +384,26 @@ fun MobiliveArcadeApp(currentUserId: String) {
                 }
             }
         }
+
+        FloatingArcadeOverlay(
+            viewModel = viewModel,
+            selectedStreamId = selectedStreamId,
+            minimizedStreamId = minimizedStreamId,
+            hideBubble = selectedStreamId != null || selectedConversationId != null,
+            bottomBarInsetDp = if (!useRail && selectedStreamId == null && selectedConversationId == null) 80.dp else 0.dp,
+            onExpandStream = { streamId ->
+                minimizedStreamId = null
+                selectedStreamId = streamId
+                navigateTab(ArcadeRoutes.WATCH)
+            },
+            onMinimizeStream = { streamId ->
+                minimizedStreamId = streamId
+            },
+            onOpenConversationInSocial = { convId ->
+                selectedConversationId = convId
+                navigateTab(ArcadeRoutes.SOCIAL)
+            }
+        )
     }
 
     if (postForComments != null) {
@@ -354,17 +416,19 @@ fun MobiliveArcadeApp(currentUserId: String) {
     }
 
     if (levelUpBanner != null) {
+        val reachedLevel = levelUpBanner!!
+        val reachedTier = LevelTier.forLevel(reachedLevel)
         AlertDialog(
             onDismissRequest = { viewModel.dismissLevelUpBanner() },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = GoldCoin)
-                    Text("LEVEL UP! Level $levelUpBanner")
+                    Text("LEVEL UP! Level $reachedLevel")
                 }
             },
             text = {
                 Text(
-                    "Congratulations! You reached Level $levelUpBanner, earned +200 bonus Gift Coins, and unlocked new Arcade Buff rewards!",
+                    "Congratulations! You reached Level $reachedLevel (${reachedTier.title}), earned +200 bonus Gift Coins, and unlocked ${reachedTier.perkSummary}!",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },

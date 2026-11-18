@@ -22,10 +22,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.data.ArcadeCatalog
 import com.example.data.PlayerStatusOption
 import com.example.data.UserProfile
 import com.example.data.formattedJoinDate
+import com.example.data.levelProgress
 import com.example.data.resolvedStatusKey
 import com.example.ui.theme.*
 
@@ -73,8 +73,7 @@ fun UserProfileCard(
     onOpenStatusPicker: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val nextLevelXp = ArcadeCatalog.xpForNextLevel(profile.level)
-    val levelProgress = ((profile.xp % 250L).toFloat() / 250f).coerceIn(0f, 1f)
+    val progress = profile.levelProgress()
 
     Column(
         modifier = modifier.testTag("user_profile_card"),
@@ -178,15 +177,27 @@ fun UserProfileCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                LevelBadge(level = profile.level)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LevelBadge(level = progress.level)
+                    Text(
+                        text = progress.tier.title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = CyanNeon,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.testTag("user_profile_tier")
+                    )
+                }
                 Text(
-                    text = "${profile.xp} / $nextLevelXp XP",
+                    text = "${progress.xpIntoCurrentLevel} / ${progress.xpRequiredForLevel} XP • ${progress.totalXp} Total",
                     style = MaterialTheme.typography.labelSmall,
                     color = VoltGreen
                 )
             }
             LinearProgressIndicator(
-                progress = { levelProgress },
+                progress = { progress.progressFraction },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp)

@@ -32,9 +32,16 @@ class ArcadeViewModel(
     private val _levelUpBanner = MutableStateFlow<Long?>(null)
     val levelUpBanner: StateFlow<Long?> = _levelUpBanner.asStateFlow()
 
+    private val _isClaimingDailyReward = MutableStateFlow(false)
+    val isClaimingDailyReward: StateFlow<Boolean> = _isClaimingDailyReward.asStateFlow()
+
+    private val _isSubmittingTournamentRegistration = MutableStateFlow(false)
+    val isSubmittingTournamentRegistration: StateFlow<Boolean> = _isSubmittingTournamentRegistration.asStateFlow()
+
     private val _selectedStreamId = MutableStateFlow<String?>(null)
     private val _selectedConversationId = MutableStateFlow<String?>(null)
     private val _selectedPostForComments = MutableStateFlow<SocialPost?>(null)
+    private val _selectedTournamentId = MutableStateFlow<String?>(null)
 
     private fun <T> Flow<T>.toUiState(label: String): StateFlow<UiState<T>> =
         map<T, UiState<T>> { UiState.Success(it) }
@@ -84,6 +91,9 @@ class ArcadeViewModel(
     val friendRequests: StateFlow<UiState<List<FriendRequest>>> =
         repository.observeFriendRequests(currentUserId).toUiState("friend requests")
 
+    val partyInvites: StateFlow<UiState<List<PartyInvite>>> =
+        repository.observePartyInvites(currentUserId).toUiState("party invites")
+
     val conversations: StateFlow<UiState<List<Conversation>>> =
         repository.observeConversations(currentUserId).toUiState("conversations")
 
@@ -121,6 +131,15 @@ class ArcadeViewModel(
             .toUiState("comments")
 
     val postForComments: StateFlow<SocialPost?> = _selectedPostForComments.asStateFlow()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val selectedTournamentRegistrations: StateFlow<UiState<List<TournamentRegistration>>> =
+        _selectedTournamentId
+            .flatMapLatest { id ->
+                if (id.isNullOrBlank()) flowOf(emptyList())
+                else repository.observeTournamentRegistrations(id)
+            }
+            .toUiState("tournament registrations")
 
     init {
         viewModelScope.launch {
@@ -161,10 +180,6 @@ class ArcadeViewModel(
         _selectedPostForComments.value = post
     }
 
-    suspend fun detectLocalLanIpAsync(): String = withContext(Dispatchers.IO) {
-        "${repository.detectLocalIpv4Address()}:19132"
-    }
-
     fun completeOnboarding(
         displayName: String,
         handle: String,
@@ -191,14 +206,25 @@ class ArcadeViewModel(
 
     fun claimDailyReward() {
         val priv = (userPrivate.value as? UiState.Success)?.data ?: return
+        if (_isClaimingDailyReward.value) return
+        val status = priv.dailyRewardStatus()
+        if (!status.canClaim) {
+            _events.tryEmit("Daily bonus already claimed! Next bonus in ${status.formattedRemaining}.")
+            return
+        }
         viewModelScope.launch {
-            repository.claimDailyReward(priv)
-                .onSuccess { reward ->
-                    val newLevel = ArcadeCatalog.calculateLevel(priv.xp + reward.xp)
-                    if (newLevel > priv.level) _levelUpBanner.value = newLevel
-                    _events.tryEmit("Day ${reward.day} claimed: +${reward.coins} Coins & +${reward.xp} XP!")
-                }
-                .onFailure { _events.tryEmit(it.unwrapFirestoreMessage("Could not claim daily reward")) }
+            _isClaimingDailyReward.value = true
+            try {
+                repository.claimDailyReward(priv)
+                    .onSuccess { reward ->
+                        val newLevel = ArcadeCatalog.calculateLevel(priv.xp + reward.xp)
+                        if (newLevel > priv.level) _levelUpBanner.value = newLevel
+                        _events.tryEmit("Day ${reward.day} claimed: +${reward.coins} Coins & +${reward.xp} XP! Next bonus in 24h.")
+                    }
+                    .onFailure { _events.tryEmit(it.unwrapFirestoreMessage("Could not claim daily reward")) }
+            } finally {
+                _isClaimingDailyReward.value = false
+            }
         }
     }
 
@@ -206,7 +232,14 @@ class ArcadeViewModel(
         val priv = (userPrivate.value as? UiState.Success)?.data ?: return
         viewModelScope.launch {
             val res = repository.claimAchievement(priv, ach)
-            emitResult(res, "Badge unlocked: ${ach.badgeTitle} (+${ach.rewardCoins} Coins)!")
+            res.onSuccess { gain ->
+                if (gain?.leveledUp == true) {
+                    _levelUpBanner.value = gain.newLevel
+                }
+                _events.tryEmit("Badge unlocked: ${ach.badgeTitle} (+${ach.rewardCoins} Coins)!")
+            }.onFailure {
+                _events.tryEmit(it.unwrapFirestoreMessage("Could not claim badge"))
+            }
         }
     }
 
@@ -216,8 +249,8 @@ class ArcadeViewModel(
         viewModelScope.launch {
             val res = repository.createPost(prof, postType, gameTag, caption, mediaUri)
             if (res.isSuccess && priv != null) {
-                val leveled = repository.grantActivityXp(priv, 35L, 15L).getOrDefault(false)
-                if (leveled) _levelUpBanner.value = priv.level + 1L
+                val gain = repository.grantActivityXp(priv, 35L, 15L).getOrNull()
+                if (gain?.leveledUp == true) _levelUpBanner.value = gain.newLevel
             }
             emitResult(res, "$postType published (+35 XP)!")
         }
@@ -257,10 +290,10 @@ class ArcadeViewModel(
             repository.startLiveStream(prof, title, gameTitle, recordReplay)
                 .onSuccess { streamId ->
                     if (priv != null) {
-                        val leveled = repository.grantActivityXp(priv, 80L, 40L).getOrDefault(false)
-                        if (leveled) _levelUpBanner.value = priv.level + 1L
+                        val gain = repository.grantActivityXp(priv, 80L, 40L).getOrNull()
+                        if (gain?.leveledUp == true) _levelUpBanner.value = gain.newLevel
                     }
-                    _events.tryEmit("You are LIVE!")
+                    _events.tryEmit("You are LIVE (+80 XP)!")
                     onStarted(streamId)
                 }
                 .onFailure { _events.tryEmit(it.unwrapFirestoreMessage("Failed to go live")) }
@@ -304,10 +337,16 @@ class ArcadeViewModel(
         }
     }
 
-    fun hostWorld(worldName: String, gameName: String, gameMode: String, lanAddress: String, maxPlayers: Long) {
+    fun hostWorld(worldName: String, gameName: String, gameMode: String, maxPlayers: Long) {
         val prof = (myProfile.value as? UiState.Success)?.data ?: return
+        val priv = (userPrivate.value as? UiState.Success)?.data
         viewModelScope.launch {
-            emitResult(repository.hostWorld(prof, worldName, gameName, gameMode, lanAddress, maxPlayers), "LAN World is now Open!")
+            val res = repository.hostWorld(prof, worldName, gameName, gameMode, maxPlayers)
+            if (res.isSuccess && priv != null) {
+                val gain = repository.grantActivityXp(priv, 45L, 10L).getOrNull()
+                if (gain?.leveledUp == true) _levelUpBanner.value = gain.newLevel
+            }
+            emitResult(res, "LAN World is now Open (+45 XP)!")
         }
     }
 
@@ -378,9 +417,110 @@ class ArcadeViewModel(
         }
     }
 
-    fun createTournament(title: String, gameTitle: String, prizeCoins: Long, entryCoins: Long, maxTeams: Long, schedule: String) {
+    fun selectTournament(tournamentId: String?) {
+        _selectedTournamentId.value = tournamentId
+    }
+
+    fun createTournament(
+        title: String,
+        gameTitle: String,
+        prizeCoins: Long,
+        entryCoins: Long,
+        maxTeams: Long,
+        schedule: String,
+        startsAtMillis: Long = 0L,
+        formatLabel: String = "Squad 4v4",
+        rulesSummary: String = ""
+    ) {
         viewModelScope.launch {
-            emitResult(repository.createTournament(title, gameTitle, prizeCoins, entryCoins, maxTeams, schedule), "Tournament created!")
+            emitResult(
+                repository.createTournament(
+                    title = title,
+                    gameTitle = gameTitle,
+                    prizeCoins = prizeCoins,
+                    entryCoins = entryCoins,
+                    maxTeams = maxTeams,
+                    scheduleLabel = schedule,
+                    startsAtMillis = startsAtMillis,
+                    formatLabel = formatLabel,
+                    rulesSummary = rulesSummary
+                ),
+                "Tournament created!"
+            )
+        }
+    }
+
+    fun registerForTournament(
+        tournament: Tournament,
+        teamName: String,
+        gamerTag: String,
+        division: String,
+        onComplete: () -> Unit = {}
+    ) {
+        if (_isSubmittingTournamentRegistration.value) return
+        val priv = (userPrivate.value as? UiState.Success)?.data
+        val prof = (myProfile.value as? UiState.Success)?.data
+        viewModelScope.launch {
+            _isSubmittingTournamentRegistration.value = true
+            try {
+                repository.registerForTournament(
+                    tournament = tournament,
+                    userPrivate = priv,
+                    profile = prof,
+                    teamName = teamName,
+                    gamerTag = gamerTag,
+                    division = division
+                ).onSuccess {
+                    if (priv != null) {
+                        val updatedCoinsPriv = priv.copy(
+                            coins = (priv.coins - tournament.entryCoins.coerceAtLeast(0L)).coerceAtLeast(0L)
+                        )
+                        repository.grantActivityXp(updatedCoinsPriv, 25L)
+                            .onSuccess { gain ->
+                                if (gain.leveledUp) _levelUpBanner.value = gain.newLevel
+                            }
+                    }
+                    _events.tryEmit("Registered for ${tournament.title}! (+25 XP)")
+                    onComplete()
+                }.onFailure {
+                    _events.tryEmit(it.unwrapFirestoreMessage("Tournament registration failed"))
+                }
+            } finally {
+                _isSubmittingTournamentRegistration.value = false
+            }
+        }
+    }
+
+    fun withdrawTournamentRegistration(
+        tournament: Tournament,
+        entryPaidCoins: Long,
+        onComplete: () -> Unit = {}
+    ) {
+        if (_isSubmittingTournamentRegistration.value) return
+        val priv = (userPrivate.value as? UiState.Success)?.data
+        viewModelScope.launch {
+            _isSubmittingTournamentRegistration.value = true
+            try {
+                repository.withdrawTournamentRegistration(tournament, priv, entryPaidCoins)
+                    .onSuccess {
+                        _events.tryEmit("Withdrew registration from ${tournament.title}")
+                        onComplete()
+                    }
+                    .onFailure {
+                        _events.tryEmit(it.unwrapFirestoreMessage("Withdrawal failed"))
+                    }
+            } finally {
+                _isSubmittingTournamentRegistration.value = false
+            }
+        }
+    }
+
+    fun updateTournamentState(tournamentId: String, nextState: String) {
+        viewModelScope.launch {
+            emitResult(
+                repository.updateTournamentState(tournamentId, nextState),
+                if (nextState == "active") "Tournament is now LIVE!" else "Tournament marked completed"
+            )
         }
     }
 
@@ -402,6 +542,75 @@ class ArcadeViewModel(
     fun respondFriendRequest(requestId: String, accept: Boolean) {
         viewModelScope.launch {
             emitResult(repository.respondFriendRequest(requestId, accept), if (accept) "Friend added!" else "Request declined")
+        }
+    }
+
+    fun removeFriend(requestId: String, friendName: String) {
+        viewModelScope.launch {
+            emitResult(repository.removeFriendRequest(requestId), "Removed $friendName from friends")
+        }
+    }
+
+    fun cancelFriendRequest(requestId: String, receiverName: String) {
+        viewModelScope.launch {
+            emitResult(repository.removeFriendRequest(requestId), "Cancelled request to $receiverName")
+        }
+    }
+
+    fun inviteFriendsToParty(friends: List<PublicProfile>, party: PartyRoom) {
+        val prof = (myProfile.value as? UiState.Success)?.data ?: return
+        viewModelScope.launch {
+            repository.sendPartyInvites(prof, friends, party)
+                .onSuccess { count ->
+                    val targetMsg = if (count == 1) friends.firstOrNull()?.displayName ?: "1 friend" else "$count friends"
+                    _events.tryEmit("Invited $targetMsg to ${party.partyName}!")
+                }
+                .onFailure { _events.tryEmit(it.unwrapFirestoreMessage("Could not send party invite")) }
+        }
+    }
+
+    fun createPartyAndInviteFriends(
+        partyName: String,
+        gameTitle: String,
+        maxSlots: Long,
+        invitees: List<PublicProfile>,
+        onCreated: () -> Unit = {}
+    ) {
+        val prof = (myProfile.value as? UiState.Success)?.data ?: return
+        viewModelScope.launch {
+            repository.createPartyAndInviteFriends(prof, partyName, gameTitle, maxSlots, invitees)
+                .onSuccess {
+                    val count = invitees.size
+                    val msg = if (count > 0) {
+                        "Created $partyName and invited $count friend${if (count == 1) "" else "s"}!"
+                    } else {
+                        "Party Voice Room created!"
+                    }
+                    _events.tryEmit(msg)
+                    onCreated()
+                }
+                .onFailure { _events.tryEmit(it.unwrapFirestoreMessage("Failed to create party")) }
+        }
+    }
+
+    fun respondPartyInvite(invite: PartyInvite, accept: Boolean, onAccepted: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.respondPartyInvite(invite, accept)
+                .onSuccess {
+                    if (accept) {
+                        _events.tryEmit("Joined ${invite.partyName}!")
+                        onAccepted()
+                    } else {
+                        _events.tryEmit("Declined invite to ${invite.partyName}")
+                    }
+                }
+                .onFailure { _events.tryEmit(it.unwrapFirestoreMessage("Could not respond to party invite")) }
+        }
+    }
+
+    fun cancelPartyInvite(inviteId: String) {
+        viewModelScope.launch {
+            emitResult(repository.cancelPartyInvite(inviteId), "Party invite cancelled")
         }
     }
 

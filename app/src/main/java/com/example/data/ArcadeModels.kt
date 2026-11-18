@@ -5,6 +5,9 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Keep
 @IgnoreExtraProperties
@@ -136,7 +139,7 @@ data class MultiplayerWorld(
     val worldName: String = "",
     val gameName: String = "Minecraft",
     val gameMode: String = "Survival",
-    val lanAddress: String = "192.168.1.100:19132",
+    val lanAddress: String = "local-lan",
     val lanVisible: Boolean = true,
     val multiplayerOn: Boolean = true,
     val worldStatus: String = "open",
@@ -194,14 +197,77 @@ data class Tournament(
     val tournamentState: String = "upcoming",
     val registeredIds: List<String> = emptyList(),
     val scheduleLabel: String = "Today 8:00 PM",
+    val startsAtMillis: Long = 0L,
+    val formatLabel: String = "Squad 4v4",
+    val rulesSummary: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
 @Keep
 @IgnoreExtraProperties
+data class TournamentRegistration(
+    @DocumentId val id: String = "",
+    val tournamentId: String = "",
+    val userId: String = "",
+    val playerName: String = "",
+    val teamName: String = "",
+    val gamerTag: String = "",
+    val division: String = "Squad",
+    val agreedRules: Boolean = true,
+    val entryPaidCoins: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+enum class TournamentPhase {
+    UPCOMING,
+    LIVE,
+    COMPLETED
+}
+
+data class TournamentCountdown(
+    val phase: TournamentPhase,
+    val targetMillis: Long,
+    val remainingMillis: Long,
+    val days: Long,
+    val hours: Long,
+    val minutes: Long,
+    val seconds: Long,
+    val isStartingSoon: Boolean,
+    val isFull: Boolean,
+    val formattedCompact: String,
+    val formattedDigital: String
+)
+
+data class TournamentStartPreset(
+    val id: String,
+    val label: String,
+    val offsetMillis: Long
+)
+
+@Keep
+@IgnoreExtraProperties
 data class FriendRequest(
     @DocumentId val id: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
+    val senderAvatar: String = "cyber_visor",
+    val receiverId: String = "",
+    val receiverName: String = "",
+    val participantIds: List<String> = emptyList(),
+    val status: String = "pending",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class PartyInvite(
+    @DocumentId val id: String = "",
+    val partyId: String = "",
+    val partyName: String = "",
+    val gameTitle: String = "Minecraft",
     val senderId: String = "",
     val senderName: String = "",
     val senderAvatar: String = "cyber_visor",
@@ -267,6 +333,16 @@ data class DailyRewardDay(
     val buffLabel: String?
 )
 
+data class DailyRewardStatus(
+    val canClaim: Boolean,
+    val remainingMillis: Long,
+    val lastClaimMillis: Long?,
+    val nextClaimMillis: Long?,
+    val progressFraction: Float,
+    val formattedRemaining: String,
+    val formattedShortRemaining: String
+)
+
 data class BuffReward(
     val code: String,
     val title: String,
@@ -328,7 +404,168 @@ object ArcadeCatalog {
         "Rocket League Sideswipe"
     )
 
-    fun xpForNextLevel(level: Long): Long = level * 250L
+    val tournamentFormats = listOf(
+        "Solo 1v1",
+        "Duo 2v2",
+        "Squad 4v4"
+    )
 
-    fun calculateLevel(xp: Long): Long = (xp / 250L) + 1L
+    val tournamentStartPresets = listOf(
+        TournamentStartPreset("15m", "In 15 min", 15L * 60_000L),
+        TournamentStartPreset("1h", "In 1 hour", 3600_000L),
+        TournamentStartPreset("6h", "In 6 hours", 6L * 3600_000L),
+        TournamentStartPreset("24h", "In 24 hours", 24L * 3600_000L),
+        TournamentStartPreset("3d", "In 3 days", 3L * 24L * 3600_000L)
+    )
+
+    const val DAILY_REWARD_COOLDOWN_MS = 24L * 60L * 60L * 1000L
+
+    fun xpForNextLevel(level: Long): Long = LevelProgressionTracker.thresholdForNextLevel(level)
+
+    fun calculateLevel(xp: Long): Long = LevelProgressionTracker.levelForXp(xp)
+
+    fun dailyRewardStatus(
+        lastClaimMillis: Long?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): DailyRewardStatus {
+        if (lastClaimMillis == null || lastClaimMillis <= 0L) {
+            return DailyRewardStatus(
+                canClaim = true,
+                remainingMillis = 0L,
+                lastClaimMillis = null,
+                nextClaimMillis = null,
+                progressFraction = 1f,
+                formattedRemaining = "Ready now",
+                formattedShortRemaining = "Ready"
+            )
+        }
+        val elapsed = (nowMillis - lastClaimMillis).coerceAtLeast(0L)
+        val remaining = (DAILY_REWARD_COOLDOWN_MS - elapsed).coerceAtLeast(0L)
+        val canClaim = remaining == 0L
+        val progress = (elapsed.toFloat() / DAILY_REWARD_COOLDOWN_MS.toFloat()).coerceIn(0f, 1f)
+        return DailyRewardStatus(
+            canClaim = canClaim,
+            remainingMillis = remaining,
+            lastClaimMillis = lastClaimMillis,
+            nextClaimMillis = lastClaimMillis + DAILY_REWARD_COOLDOWN_MS,
+            progressFraction = if (canClaim) 1f else progress,
+            formattedRemaining = if (canClaim) "Ready now" else formatCooldownFull(remaining),
+            formattedShortRemaining = if (canClaim) "Ready" else formatCooldownCompact(remaining)
+        )
+    }
+
+    fun formatCooldownFull(remainingMillis: Long): String {
+        val totalSec = ((remainingMillis + 999L) / 1000L).coerceAtLeast(0L)
+        val hours = totalSec / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        return String.format(Locale.US, "%02dh %02dm %02ds", hours, minutes, seconds)
+    }
+
+    fun formatCooldownCompact(remainingMillis: Long): String {
+        val totalSec = ((remainingMillis + 999L) / 1000L).coerceAtLeast(0L)
+        val hours = totalSec / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        return when {
+            hours > 0L -> "${hours}h ${minutes}m"
+            minutes > 0L -> "${minutes}m ${seconds}s"
+            else -> "${seconds}s"
+        }
+    }
+}
+
+fun Tournament.effectiveStartsAtMillis(): Long = when {
+    startsAtMillis > 0L -> startsAtMillis
+    createdAt != null -> createdAt.toDate().time + (6L * 3600_000L)
+    else -> 0L
+}
+
+fun Tournament.countdownStatus(nowMillis: Long = System.currentTimeMillis()): TournamentCountdown {
+    val targetMillis = effectiveStartsAtMillis()
+    val isFull = registeredIds.size >= maxTeams.toInt()
+    if (tournamentState == "completed") {
+        return TournamentCountdown(
+            phase = TournamentPhase.COMPLETED,
+            targetMillis = targetMillis,
+            remainingMillis = 0L,
+            days = 0L,
+            hours = 0L,
+            minutes = 0L,
+            seconds = 0L,
+            isStartingSoon = false,
+            isFull = isFull,
+            formattedCompact = "Event Completed",
+            formattedDigital = "00:00:00"
+        )
+    }
+    if (tournamentState == "active" || (targetMillis > 0L && nowMillis >= targetMillis)) {
+        return TournamentCountdown(
+            phase = TournamentPhase.LIVE,
+            targetMillis = targetMillis,
+            remainingMillis = 0L,
+            days = 0L,
+            hours = 0L,
+            minutes = 0L,
+            seconds = 0L,
+            isStartingSoon = true,
+            isFull = isFull,
+            formattedCompact = "Live Now",
+            formattedDigital = "LIVE NOW"
+        )
+    }
+    if (targetMillis <= 0L) {
+        return TournamentCountdown(
+            phase = TournamentPhase.UPCOMING,
+            targetMillis = 0L,
+            remainingMillis = 0L,
+            days = 0L,
+            hours = 0L,
+            minutes = 0L,
+            seconds = 0L,
+            isStartingSoon = false,
+            isFull = isFull,
+            formattedCompact = scheduleLabel.ifBlank { "Starts soon" },
+            formattedDigital = "--:--:--"
+        )
+    }
+
+    val remaining = (targetMillis - nowMillis).coerceAtLeast(0L)
+    val totalSec = ((remaining + 999L) / 1000L).coerceAtLeast(0L)
+    val days = totalSec / 86400L
+    val hours = (totalSec % 86400L) / 3600L
+    val minutes = (totalSec % 3600L) / 60L
+    val seconds = totalSec % 60L
+
+    val compact = when {
+        days > 0L -> String.format(Locale.US, "%dd %02dh %02dm", days, hours, minutes)
+        hours > 0L -> String.format(Locale.US, "%02dh %02dm %02ds", hours, minutes, seconds)
+        else -> String.format(Locale.US, "%02dm %02ds", minutes, seconds)
+    }
+    val digital = if (days > 0L) {
+        String.format(Locale.US, "%02d:%02d:%02d:%02d", days, hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+    return TournamentCountdown(
+        phase = TournamentPhase.UPCOMING,
+        targetMillis = targetMillis,
+        remainingMillis = remaining,
+        days = days,
+        hours = hours,
+        minutes = minutes,
+        seconds = seconds,
+        isStartingSoon = remaining <= 3600_000L,
+        isFull = isFull,
+        formattedCompact = compact,
+        formattedDigital = digital
+    )
+}
+
+fun UserPrivate?.dailyRewardStatus(nowMillis: Long = System.currentTimeMillis()): DailyRewardStatus =
+    ArcadeCatalog.dailyRewardStatus(this?.lastDailyClaimAt?.toDate()?.time, nowMillis)
+
+fun Timestamp?.formattedLastClaimed(): String {
+    val date: Date = this?.toDate() ?: return "Not claimed yet"
+    return SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(date)
 }

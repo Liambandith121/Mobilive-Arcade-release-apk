@@ -11,16 +11,12 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
-import java.net.Inet4Address
-import java.net.NetworkInterface
 
 class ArcadeRepository(
     private val db: FirebaseFirestore,
@@ -233,58 +229,77 @@ class ArcadeRepository(
     suspend fun claimDailyReward(userPrivate: UserPrivate): Result<DailyRewardDay> {
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
         return try {
-            val nextIndex = ((userPrivate.lastClaimDayIndex % 7L) + 1L).toInt()
-            val reward = ArcadeCatalog.dailyRewards.first { it.day == nextIndex }
-            val hasCoinBuff = userPrivate.activeBuffs.contains("COIN_BUFF_15")
-            val hasXpBuff = userPrivate.activeBuffs.contains("XP_BOOST_20")
-            val coinEarned = if (hasCoinBuff) (reward.coins * 115L) / 100L else reward.coins
-            val xpEarned = if (hasXpBuff) (reward.xp * 120L) / 100L else reward.xp
-            val newXp = userPrivate.xp + xpEarned
-            val newLevel = ArcadeCatalog.calculateLevel(newXp)
-            val newCoins = userPrivate.coins + coinEarned
-            val updatedBuffs = buildSet {
-                addAll(userPrivate.activeBuffs)
-                if (reward.buffLabel != null) add(reward.buffLabel)
-                ArcadeCatalog.levelBuffs.filter { it.unlockLevel <= newLevel }.forEach { add(it.code) }
-            }.toList().take(10)
+            val claimedReward = db.runTransaction { transaction ->
+                val userRef = db.collection("users").document(uid)
+                val profileRef = db.collection("public_profiles").document(uid)
+                val userSnap = transaction.get(userRef)
+                val latestPrivate = userSnap.toObject(
+                    UserPrivate::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                ) ?: userPrivate
 
-            val batch = db.batch()
-            batch.update(
-                db.collection("users").document(uid),
-                mapOf(
-                    "coins" to newCoins,
-                    "xp" to newXp,
-                    "level" to newLevel,
-                    "streakDays" to userPrivate.streakDays + 1L,
-                    "lastClaimDayIndex" to nextIndex.toLong(),
-                    "activeBuffs" to updatedBuffs,
-                    "lastDailyClaimAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
+                val lastClaimMs = latestPrivate.lastDailyClaimAt?.toDate()?.time
+                val rewardStatus = ArcadeCatalog.dailyRewardStatus(lastClaimMs, System.currentTimeMillis())
+                if (!rewardStatus.canClaim) {
+                    throw IllegalStateException(
+                        "Daily bonus already claimed! Next bonus in ${rewardStatus.formattedRemaining}."
+                    )
+                }
+
+                val nextIndex = ((latestPrivate.lastClaimDayIndex % 7L) + 1L).toInt()
+                val reward = ArcadeCatalog.dailyRewards.first { it.day == nextIndex }
+                val hasCoinBuff = latestPrivate.activeBuffs.contains("COIN_BUFF_15")
+                val hasXpBuff = latestPrivate.activeBuffs.contains("XP_BOOST_20")
+                val coinEarned = if (hasCoinBuff) (reward.coins * 115L) / 100L else reward.coins
+                val xpGain = LevelProgressionTracker.applyXpGain(
+                    currentXp = latestPrivate.xp,
+                    baseXp = reward.xp,
+                    multiplierPercent = if (hasXpBuff) 120L else 100L
                 )
-            )
-            batch.update(
-                db.collection("public_profiles").document(uid),
-                mapOf(
-                    "level" to newLevel,
-                    "xp" to newXp,
-                    "updatedAt" to FieldValue.serverTimestamp()
+                val newCoins = latestPrivate.coins + coinEarned + xpGain.levelUpBonusCoins
+                val updatedBuffs = buildSet {
+                    addAll(latestPrivate.activeBuffs)
+                    if (reward.buffLabel != null) add(reward.buffLabel)
+                    ArcadeCatalog.levelBuffs.filter { it.unlockLevel <= xpGain.newLevel }.forEach { add(it.code) }
+                }.toList().take(10)
+
+                transaction.update(
+                    userRef,
+                    mapOf(
+                        "coins" to newCoins,
+                        "xp" to xpGain.newXp,
+                        "level" to xpGain.newLevel,
+                        "streakDays" to latestPrivate.streakDays + 1L,
+                        "lastClaimDayIndex" to nextIndex.toLong(),
+                        "activeBuffs" to updatedBuffs,
+                        "lastDailyClaimAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
                 )
-            )
-            val notifRef = db.collection("users").document(uid).collection("notifications").document()
-            batch.set(
-                notifRef,
-                mapOf(
-                    "userId" to uid,
-                    "title" to "Day $nextIndex Gift Claimed!",
-                    "body" to "+$coinEarned Coins & +$xpEarned XP added (Level $newLevel).",
-                    "notifType" to "reward",
-                    "readFlag" to false,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
+                transaction.update(
+                    profileRef,
+                    mapOf(
+                        "level" to xpGain.newLevel,
+                        "xp" to xpGain.newXp,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
                 )
-            )
-            batch.commit().await()
-            Result.success(reward.copy(coins = coinEarned, xp = xpEarned))
+                val notifRef = userRef.collection("notifications").document()
+                transaction.set(
+                    notifRef,
+                    mapOf(
+                        "userId" to uid,
+                        "title" to "Day $nextIndex Daily Bonus Claimed!",
+                        "body" to "+$coinEarned Coins & +${xpGain.xpEarned} XP added (Level ${xpGain.newLevel}). Come back in 24h!",
+                        "notifType" to "reward",
+                        "readFlag" to false,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                reward.copy(coins = coinEarned, xp = xpGain.xpEarned)
+            }.await()
+            Result.success(claimedReward)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -293,40 +308,65 @@ class ArcadeRepository(
         }
     }
 
-    suspend fun grantActivityXp(userPrivate: UserPrivate, baseXp: Long, bonusCoins: Long = 0L): Result<Boolean> {
+    suspend fun grantActivityXp(userPrivate: UserPrivate, baseXp: Long, bonusCoins: Long = 0L): Result<XpGainResult> {
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
         return try {
-            val multiplier = if (userPrivate.activeBuffs.contains("XP_BOOST_20")) 120L else 110L
-            val earnedXp = (baseXp * multiplier) / 100L
-            val newXp = userPrivate.xp + earnedXp
-            val newLevel = ArcadeCatalog.calculateLevel(newXp)
-            val leveledUp = newLevel > userPrivate.level
-            val updatedBuffs = buildSet {
-                addAll(userPrivate.activeBuffs)
-                ArcadeCatalog.levelBuffs.filter { it.unlockLevel <= newLevel }.forEach { add(it.code) }
-            }.toList().take(10)
+            val result = db.runTransaction { transaction ->
+                val userRef = db.collection("users").document(uid)
+                val profileRef = db.collection("public_profiles").document(uid)
+                val latestPrivate = transaction.get(userRef).toObject(
+                    UserPrivate::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                ) ?: userPrivate
 
-            val batch = db.batch()
-            batch.update(
-                db.collection("users").document(uid),
-                mapOf(
-                    "xp" to newXp,
-                    "level" to newLevel,
-                    "coins" to userPrivate.coins + bonusCoins + if (leveledUp) 200L else 0L,
-                    "activeBuffs" to updatedBuffs,
-                    "updatedAt" to FieldValue.serverTimestamp()
+                val multiplier = if (latestPrivate.activeBuffs.contains("XP_BOOST_20")) 120L else 110L
+                val xpGain = LevelProgressionTracker.applyXpGain(
+                    currentXp = latestPrivate.xp,
+                    baseXp = baseXp,
+                    multiplierPercent = multiplier
                 )
-            )
-            batch.update(
-                db.collection("public_profiles").document(uid),
-                mapOf(
-                    "xp" to newXp,
-                    "level" to newLevel,
-                    "updatedAt" to FieldValue.serverTimestamp()
+                val updatedBuffs = buildSet {
+                    addAll(latestPrivate.activeBuffs)
+                    ArcadeCatalog.levelBuffs.filter { it.unlockLevel <= xpGain.newLevel }.forEach { add(it.code) }
+                }.toList().take(10)
+
+                transaction.update(
+                    userRef,
+                    mapOf(
+                        "xp" to xpGain.newXp,
+                        "level" to xpGain.newLevel,
+                        "coins" to latestPrivate.coins + bonusCoins.coerceAtLeast(0L) + xpGain.levelUpBonusCoins,
+                        "activeBuffs" to updatedBuffs,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
                 )
-            )
-            batch.commit().await()
-            Result.success(leveledUp)
+                transaction.update(
+                    profileRef,
+                    mapOf(
+                        "xp" to xpGain.newXp,
+                        "level" to xpGain.newLevel,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                if (xpGain.leveledUp) {
+                    val tier = LevelTier.forLevel(xpGain.newLevel)
+                    val notifRef = userRef.collection("notifications").document()
+                    transaction.set(
+                        notifRef,
+                        mapOf(
+                            "userId" to uid,
+                            "title" to "Level ${xpGain.newLevel} Reached!",
+                            "body" to "Rank unlocked: ${tier.title} (+${xpGain.levelUpBonusCoins} bonus Coins).",
+                            "notifType" to "reward",
+                            "readFlag" to false,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                xpGain
+            }.await()
+            Result.success(result)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -335,33 +375,61 @@ class ArcadeRepository(
         }
     }
 
-    suspend fun claimAchievement(userPrivate: UserPrivate, ach: AchievementDef): Result<Unit> =
-        runMutation(OperationType.UPDATE, "users") { uid ->
-            if (userPrivate.claimedAchievementIds.contains(ach.id)) return@runMutation
-            val newXp = userPrivate.xp + ach.rewardXp
-            val newLevel = ArcadeCatalog.calculateLevel(newXp)
-            val updatedClaimed = (userPrivate.claimedAchievementIds + ach.id).distinct().take(50)
-            val batch = db.batch()
-            batch.update(
-                db.collection("users").document(uid),
-                mapOf(
-                    "coins" to userPrivate.coins + ach.rewardCoins,
-                    "xp" to newXp,
-                    "level" to newLevel,
-                    "claimedAchievementIds" to updatedClaimed,
-                    "updatedAt" to FieldValue.serverTimestamp()
+    suspend fun claimAchievement(userPrivate: UserPrivate, ach: AchievementDef): Result<XpGainResult?> {
+        val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
+        return try {
+            val gain = db.runTransaction { transaction ->
+                val userRef = db.collection("users").document(uid)
+                val profileRef = db.collection("public_profiles").document(uid)
+                val latestPrivate = transaction.get(userRef).toObject(
+                    UserPrivate::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                ) ?: userPrivate
+
+                if (latestPrivate.claimedAchievementIds.contains(ach.id)) {
+                    return@runTransaction null
+                }
+
+                val xpGain = LevelProgressionTracker.applyXpGain(
+                    currentXp = latestPrivate.xp,
+                    baseXp = ach.rewardXp,
+                    multiplierPercent = 100L
                 )
-            )
-            batch.update(
-                db.collection("public_profiles").document(uid),
-                mapOf(
-                    "xp" to newXp,
-                    "level" to newLevel,
-                    "updatedAt" to FieldValue.serverTimestamp()
+                val updatedClaimed = (latestPrivate.claimedAchievementIds + ach.id).distinct().take(50)
+                val updatedBuffs = buildSet {
+                    addAll(latestPrivate.activeBuffs)
+                    ArcadeCatalog.levelBuffs.filter { it.unlockLevel <= xpGain.newLevel }.forEach { add(it.code) }
+                }.toList().take(10)
+
+                transaction.update(
+                    userRef,
+                    mapOf(
+                        "coins" to latestPrivate.coins + ach.rewardCoins + xpGain.levelUpBonusCoins,
+                        "xp" to xpGain.newXp,
+                        "level" to xpGain.newLevel,
+                        "activeBuffs" to updatedBuffs,
+                        "claimedAchievementIds" to updatedClaimed,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
                 )
-            )
-            batch.commit().await()
+                transaction.update(
+                    profileRef,
+                    mapOf(
+                        "xp" to xpGain.newXp,
+                        "level" to xpGain.newLevel,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                xpGain
+            }.await()
+            Result.success(gain)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "users/$uid")
+            Result.failure(e)
         }
+    }
 
     // --- Privacy, Follow, Block & Report ---
 
@@ -840,17 +908,6 @@ class ArcadeRepository(
 
     // --- Multiplayer LAN Worlds ---
 
-    fun detectLocalIpv4Address(): String {
-        return try {
-            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
-                .flatMap { it.inetAddresses.toList() }
-                .firstOrNull { !it.isLoopbackAddress && it is Inet4Address }
-                ?.hostAddress ?: "192.168.1.100"
-        } catch (_: Exception) {
-            "192.168.1.100"
-        }
-    }
-
     fun observeWorlds(): Flow<List<MultiplayerWorld>> = flow {
         val uid = requireUserId()
         emitAll(
@@ -870,14 +927,10 @@ class ArcadeRepository(
         worldName: String,
         gameName: String,
         gameMode: String,
-        lanAddress: String,
         maxPlayers: Long
     ): Result<Unit> = runMutation(OperationType.CREATE, "worlds") { uid ->
         val cleanName = worldName.trim().take(80)
         require(cleanName.isNotEmpty()) { "World name is required" }
-        val resolvedLanAddress = lanAddress.ifBlank {
-            withContext(Dispatchers.IO) { "${detectLocalIpv4Address()}:19132" }
-        }.take(80)
         db.collection("worlds").document().set(
             mapOf(
                 "hostId" to uid,
@@ -886,7 +939,7 @@ class ArcadeRepository(
                 "worldName" to cleanName,
                 "gameName" to gameName.ifBlank { "Minecraft" }.take(50),
                 "gameMode" to gameMode,
-                "lanAddress" to resolvedLanAddress,
+                "lanAddress" to "local-lan",
                 "lanVisible" to true,
                 "multiplayerOn" to true,
                 "worldStatus" to "open",
@@ -1075,9 +1128,33 @@ class ArcadeRepository(
                 .snapshots()
                 .map { snap ->
                     snap.toObjects(Tournament::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                        .sortedByDescending { it.createdAt ?: com.google.firebase.Timestamp(0, 0) }
+                        .sortedWith(
+                            compareBy<Tournament> {
+                                when (it.tournamentState) {
+                                    "upcoming" -> 0
+                                    "active" -> 1
+                                    else -> 2
+                                }
+                            }.thenBy {
+                                if (it.startsAtMillis > 0L) it.startsAtMillis else Long.MAX_VALUE
+                            }.thenByDescending { it.createdAt ?: com.google.firebase.Timestamp(0, 0) }
+                        )
                 }
                 .logFirestoreErrors(OperationType.LIST, "tournaments", uid)
+        )
+    }
+
+    fun observeTournamentRegistrations(tournamentId: String): Flow<List<TournamentRegistration>> = flow {
+        val uid = requireUserId()
+        emitAll(
+            db.collection("tournaments").document(tournamentId).collection("registrations")
+                .whereEqualTo("tournamentId", tournamentId)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(TournamentRegistration::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: com.google.firebase.Timestamp(0, 0) }
+                }
+                .logFirestoreErrors(OperationType.LIST, "tournaments/$tournamentId/registrations", uid)
         )
     }
 
@@ -1087,10 +1164,14 @@ class ArcadeRepository(
         prizeCoins: Long,
         entryCoins: Long,
         maxTeams: Long,
-        scheduleLabel: String
+        scheduleLabel: String,
+        startsAtMillis: Long = 0L,
+        formatLabel: String = "Squad 4v4",
+        rulesSummary: String = ""
     ): Result<Unit> = runMutation(OperationType.CREATE, "tournaments") { uid ->
         val cleanTitle = title.trim().take(80)
         require(cleanTitle.length >= 2) { "Tournament title required" }
+        val resolvedStart = if (startsAtMillis > 0L) startsAtMillis else System.currentTimeMillis() + 3600_000L
         db.collection("tournaments").document().set(
             mapOf(
                 "organizerId" to uid,
@@ -1101,12 +1182,123 @@ class ArcadeRepository(
                 "maxTeams" to maxTeams.coerceIn(2L, 64L),
                 "tournamentState" to "upcoming",
                 "registeredIds" to listOf(uid),
-                "scheduleLabel" to scheduleLabel.ifBlank { "Tonight 8:00 PM" }.take(40),
+                "scheduleLabel" to scheduleLabel.ifBlank { "In 1 hour" }.take(40),
+                "startsAtMillis" to resolvedStart.coerceAtLeast(0L),
+                "formatLabel" to formatLabel.ifBlank { "Squad 4v4" }.take(32),
+                "rulesSummary" to rulesSummary.trim().ifBlank { "Fair play required • Check in 15 min before kickoff." }.take(240),
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
         ).await()
     }
+
+    suspend fun registerForTournament(
+        tournament: Tournament,
+        userPrivate: UserPrivate?,
+        profile: PublicProfile?,
+        teamName: String,
+        gamerTag: String,
+        division: String
+    ): Result<Unit> = runMutation(OperationType.WRITE, "tournaments/${tournament.id}/registrations") { uid ->
+        require(tournament.tournamentState == "upcoming") { "Registration is only open for upcoming tournaments." }
+        require(!tournament.registeredIds.contains(uid)) { "You are already registered for this tournament." }
+        require(tournament.registeredIds.size < tournament.maxTeams.toInt()) { "Tournament bracket is full." }
+        val cleanTeam = teamName.trim().take(50)
+        val cleanTag = gamerTag.trim().take(40)
+        require(cleanTeam.isNotEmpty()) { "Team or squad name is required." }
+        require(cleanTag.isNotEmpty()) { "In-game tag or ID is required." }
+        val normalizedDivision = when (division) {
+            "Solo", "Duo", "Squad" -> division
+            else -> "Squad"
+        }
+        val fee = tournament.entryCoins.coerceAtLeast(0L)
+        if (fee > 0L) {
+            val balance = userPrivate?.coins ?: 0L
+            require(balance >= fee) { "Need $fee Gift Coins to cover the tournament entry fee." }
+        }
+
+        val tourRef = db.collection("tournaments").document(tournament.id)
+        val regRef = tourRef.collection("registrations").document(uid)
+        val updatedIds = (tournament.registeredIds + uid).distinct().take(tournament.maxTeams.toInt())
+        val playerName = profile?.displayName?.ifBlank { "Contender" }?.take(50) ?: "Contender"
+
+        val batch = db.batch()
+        batch.set(
+            regRef,
+            mapOf(
+                "tournamentId" to tournament.id,
+                "userId" to uid,
+                "playerName" to playerName,
+                "teamName" to cleanTeam,
+                "gamerTag" to cleanTag,
+                "division" to normalizedDivision,
+                "agreedRules" to true,
+                "entryPaidCoins" to fee,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        batch.update(
+            tourRef,
+            mapOf(
+                "registeredIds" to updatedIds,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        if (fee > 0L && userPrivate != null) {
+            batch.update(
+                db.collection("users").document(uid),
+                mapOf(
+                    "coins" to (userPrivate.coins - fee).coerceAtLeast(0L),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+        batch.commit().await()
+    }
+
+    suspend fun withdrawTournamentRegistration(
+        tournament: Tournament,
+        userPrivate: UserPrivate?,
+        refundCoins: Long
+    ): Result<Unit> = runMutation(OperationType.WRITE, "tournaments/${tournament.id}/registrations") { uid ->
+        require(tournament.tournamentState != "completed") { "Completed tournaments cannot be modified." }
+        val tourRef = db.collection("tournaments").document(tournament.id)
+        val regRef = tourRef.collection("registrations").document(uid)
+        val updatedIds = tournament.registeredIds - uid
+        val safeRefund = refundCoins.coerceIn(0L, 10000L)
+
+        val batch = db.batch()
+        batch.update(
+            tourRef,
+            mapOf(
+                "registeredIds" to updatedIds,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        batch.delete(regRef)
+        if (safeRefund > 0L && userPrivate != null) {
+            batch.update(
+                db.collection("users").document(uid),
+                mapOf(
+                    "coins" to userPrivate.coins + safeRefund,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+        batch.commit().await()
+    }
+
+    suspend fun updateTournamentState(tournamentId: String, nextState: String): Result<Unit> =
+        runMutation(OperationType.UPDATE, "tournaments/$tournamentId") {
+            require(nextState in listOf("upcoming", "active", "completed")) { "Invalid tournament state" }
+            db.collection("tournaments").document(tournamentId).update(
+                mapOf(
+                    "tournamentState" to nextState,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
 
     suspend fun toggleRegisterTournament(tournament: Tournament): Result<Boolean> {
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
@@ -1152,7 +1344,18 @@ class ArcadeRepository(
         runMutation(OperationType.CREATE, "friend_requests") { uid ->
             require(uid != receiver.userId) { "Cannot add yourself" }
             val docId = listOf(uid, receiver.userId).sorted().joinToString("_")
-            db.collection("friend_requests").document(docId).set(
+            val docRef = db.collection("friend_requests").document(docId)
+            val existingSnap = docRef.get().await()
+            if (existingSnap.exists()) {
+                val existingStatus = existingSnap.getString("status")
+                if (existingStatus == "accepted") {
+                    throw IllegalStateException("Already friends with ${receiver.displayName}")
+                }
+                if (existingStatus == "declined") {
+                    docRef.delete().await()
+                }
+            }
+            docRef.set(
                 mapOf(
                     "senderId" to uid,
                     "senderName" to sender.displayName.ifBlank { "Player" }.take(50),
@@ -1175,6 +1378,181 @@ class ArcadeRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
+        }
+
+    suspend fun removeFriendRequest(requestId: String): Result<Unit> =
+        runMutation(OperationType.DELETE, "friend_requests/$requestId") {
+            require(requestId.isNotBlank()) { "Friend request ID required" }
+            db.collection("friend_requests").document(requestId).delete().await()
+        }
+
+    // --- Multiplayer Party Invites ---
+
+    fun observePartyInvites(uid: String): Flow<List<PartyInvite>> = flow {
+        requireUserId()
+        emitAll(
+            db.collection("party_invites")
+                .whereArrayContains("participantIds", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(PartyInvite::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.updatedAt ?: com.google.firebase.Timestamp(0, 0) }
+                }
+                .logFirestoreErrors(OperationType.LIST, "party_invites", uid)
+        )
+    }
+
+    suspend fun sendPartyInvites(
+        sender: PublicProfile,
+        receivers: List<PublicProfile>,
+        party: PartyRoom
+    ): Result<Int> {
+        val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
+        val validReceivers = receivers
+            .filter { it.userId != uid && !party.memberIds.contains(it.userId) }
+            .distinctBy { it.userId }
+        if (validReceivers.isEmpty()) {
+            return Result.failure(IllegalStateException("Select at least one friend not already in the party"))
+        }
+        return try {
+            val batch = db.batch()
+            validReceivers.forEach { receiver ->
+                val docRef = db.collection("party_invites").document()
+                batch.set(
+                    docRef,
+                    mapOf(
+                        "partyId" to party.id,
+                        "partyName" to party.partyName.ifBlank { "Arcade Party" }.take(60),
+                        "gameTitle" to party.gameTitle.ifBlank { "Minecraft" }.take(60),
+                        "senderId" to uid,
+                        "senderName" to sender.displayName.ifBlank { "Player" }.take(50),
+                        "senderAvatar" to sender.avatarStyle.ifBlank { "cyber_visor" },
+                        "receiverId" to receiver.userId,
+                        "receiverName" to receiver.displayName.ifBlank { "Friend" }.take(50),
+                        "participantIds" to listOf(uid, receiver.userId),
+                        "status" to "pending",
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.commit().await()
+            Result.success(validReceivers.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "party_invites")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createPartyAndInviteFriends(
+        sender: PublicProfile,
+        partyName: String,
+        gameTitle: String,
+        maxSlots: Long,
+        invitees: List<PublicProfile>
+    ): Result<String> {
+        val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
+        return try {
+            val cleanName = partyName.trim().take(60)
+            require(cleanName.isNotEmpty()) { "Party name required" }
+            val cleanGame = gameTitle.ifBlank { "Minecraft" }.take(60)
+            val partyRef = db.collection("parties").document()
+            val batch = db.batch()
+            batch.set(
+                partyRef,
+                mapOf(
+                    "leaderId" to uid,
+                    "leaderName" to sender.displayName.ifBlank { "Leader" }.take(50),
+                    "partyName" to cleanName,
+                    "gameTitle" to cleanGame,
+                    "maxSlots" to maxSlots.coerceIn(2L, 8L),
+                    "memberIds" to listOf(uid),
+                    "mutedMemberIds" to emptyList<String>(),
+                    "voiceActive" to true,
+                    "queueState" to "idle",
+                    "partyStatus" to "active",
+                    "matchedLobbyCode" to "",
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            invitees
+                .filter { it.userId != uid }
+                .distinctBy { it.userId }
+                .forEach { receiver ->
+                    val inviteRef = db.collection("party_invites").document()
+                    batch.set(
+                        inviteRef,
+                        mapOf(
+                            "partyId" to partyRef.id,
+                            "partyName" to cleanName,
+                            "gameTitle" to cleanGame,
+                            "senderId" to uid,
+                            "senderName" to sender.displayName.ifBlank { "Player" }.take(50),
+                            "senderAvatar" to sender.avatarStyle.ifBlank { "cyber_visor" },
+                            "receiverId" to receiver.userId,
+                            "receiverName" to receiver.displayName.ifBlank { "Friend" }.take(50),
+                            "participantIds" to listOf(uid, receiver.userId),
+                            "status" to "pending",
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+            batch.commit().await()
+            Result.success(partyRef.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "parties")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun respondPartyInvite(invite: PartyInvite, accept: Boolean): Result<Unit> =
+        runMutation(OperationType.UPDATE, "party_invites/${invite.id}") { uid ->
+            val inviteRef = db.collection("party_invites").document(invite.id)
+            if (!accept) {
+                inviteRef.update(
+                    mapOf(
+                        "status" to "declined",
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                return@runMutation
+            }
+
+            val partyRef = db.collection("parties").document(invite.partyId)
+            val partySnap = partyRef.get().await()
+            val party = partySnap.toObject(PartyRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                ?: throw IllegalStateException("This party room is no longer available.")
+            require(party.partyStatus == "active") { "This party room has closed." }
+            val updatedMembers = (party.memberIds + uid).distinct()
+            require(updatedMembers.size <= party.maxSlots.toInt()) { "Party is already full." }
+
+            val batch = db.batch()
+            batch.update(
+                inviteRef,
+                mapOf(
+                    "status" to "accepted",
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.update(
+                partyRef,
+                mapOf(
+                    "memberIds" to updatedMembers,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.commit().await()
+        }
+
+    suspend fun cancelPartyInvite(inviteId: String): Result<Unit> =
+        runMutation(OperationType.DELETE, "party_invites/$inviteId") {
+            db.collection("party_invites").document(inviteId).delete().await()
         }
 
     fun observeConversations(uid: String): Flow<List<Conversation>> = flow {

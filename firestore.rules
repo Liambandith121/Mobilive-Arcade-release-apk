@@ -59,6 +59,15 @@ service cloud.firestore {
              isValidTimestamp(data.updatedAt);
     }
 
+    function canClaimDailyReward(incomingData, existingData) {
+      return incomingData.lastDailyClaimAt is timestamp &&
+             incomingData.lastDailyClaimAt <= request.time &&
+             incomingData.lastDailyClaimAt >= request.time - duration.value(5, 'm') &&
+             (!('lastDailyClaimAt' in existingData) ||
+              existingData.lastDailyClaimAt == null ||
+              existingData.lastDailyClaimAt <= request.time - duration.value(24, 'h'));
+    }
+
     function isValidPublicProfile(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.handle is string && data.handle.size() >= 2 && data.handle.size() <= 30 &&
@@ -218,12 +227,44 @@ service cloud.firestore {
              data.tournamentState in ['upcoming', 'active', 'completed'] &&
              isBoundedStringList(data.registeredIds, 64) &&
              data.scheduleLabel is string && data.scheduleLabel.size() >= 1 && data.scheduleLabel.size() <= 40 &&
+             (!('startsAtMillis' in data) || (data.startsAtMillis is int && data.startsAtMillis >= 0)) &&
+             (!('formatLabel' in data) || (data.formatLabel is string && data.formatLabel.size() >= 1 && data.formatLabel.size() <= 32)) &&
+             (!('rulesSummary' in data) || (data.rulesSummary is string && data.rulesSummary.size() <= 240)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidTournamentRegistration(data) {
+      return data.tournamentId is string && data.tournamentId.size() >= 1 && data.tournamentId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 50 &&
+             data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 50 &&
+             data.gamerTag is string && data.gamerTag.size() >= 1 && data.gamerTag.size() <= 40 &&
+             data.division in ['Solo', 'Duo', 'Squad'] &&
+             data.agreedRules == true &&
+             data.entryPaidCoins is int && data.entryPaidCoins >= 0 && data.entryPaidCoins <= 10000 &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
 
     function isValidFriendRequest(data) {
       return data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 50 &&
+             data.senderAvatar is string && data.senderAvatar.size() >= 1 && data.senderAvatar.size() <= 40 &&
+             data.receiverId is string && data.receiverId.size() >= 1 && data.receiverId.size() <= 128 &&
+             data.receiverName is string && data.receiverName.size() >= 1 && data.receiverName.size() <= 50 &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.senderId in data.participantIds && data.receiverId in data.participantIds &&
+             data.status in ['pending', 'accepted', 'declined'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPartyInvite(data) {
+      return data.partyId is string && data.partyId.size() >= 1 && data.partyId.size() <= 128 &&
+             data.partyName is string && data.partyName.size() >= 1 && data.partyName.size() <= 60 &&
+             data.gameTitle is string && data.gameTitle.size() >= 1 && data.gameTitle.size() <= 60 &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 50 &&
              data.senderAvatar is string && data.senderAvatar.size() >= 1 && data.senderAvatar.size() <= 40 &&
              data.receiverId is string && data.receiverId.size() >= 1 && data.receiverId.size() <= 128 &&
@@ -273,6 +314,7 @@ service cloud.firestore {
       allow create: if isOwner(userId) &&
                        isValidId(userId) &&
                        incoming().userId == request.auth.uid &&
+                       (!('lastDailyClaimAt' in incoming()) || incoming().lastDailyClaimAt == null) &&
                        incoming().keys().hasAll(['userId', 'email', 'coins', 'xp', 'level', 'streakDays', 'lastClaimDayIndex', 'activeBuffs', 'privacyDmPolicy', 'privacyShowOnline', 'privacyLanVisible', 'autoSaveReplays', 'blockedUserIds', 'followingUserIds', 'joinedCommunityIds', 'claimedAchievementIds', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['userId', 'email', 'coins', 'xp', 'level', 'streakDays', 'lastClaimDayIndex', 'activeBuffs', 'privacyDmPolicy', 'privacyShowOnline', 'privacyLanVisible', 'autoSaveReplays', 'blockedUserIds', 'followingUserIds', 'joinedCommunityIds', 'claimedAchievementIds', 'lastDailyClaimAt', 'createdAt', 'updatedAt']) &&
                        isValidUserPrivate(incoming());
@@ -282,7 +324,9 @@ service cloud.firestore {
                        isValidUserPrivate(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['coins', 'xp', 'level', 'streakDays', 'lastClaimDayIndex', 'activeBuffs', 'privacyDmPolicy', 'privacyShowOnline', 'privacyLanVisible', 'autoSaveReplays', 'blockedUserIds', 'followingUserIds', 'joinedCommunityIds', 'claimedAchievementIds', 'lastDailyClaimAt', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['coins', 'xp', 'level', 'streakDays', 'lastClaimDayIndex', 'activeBuffs', 'privacyDmPolicy', 'privacyShowOnline', 'privacyLanVisible', 'autoSaveReplays', 'blockedUserIds', 'followingUserIds', 'joinedCommunityIds', 'claimedAchievementIds', 'lastDailyClaimAt', 'updatedAt']) &&
+                       (!incoming().diff(existing()).affectedKeys().hasAny(['lastDailyClaimAt', 'lastClaimDayIndex']) ||
+                        canClaimDailyReward(incoming(), existing()));
 
       allow delete: if false;
 
@@ -546,7 +590,7 @@ service cloud.firestore {
                        isValidId(tournamentId) &&
                        incoming().organizerId == request.auth.uid &&
                        incoming().keys().hasAll(['organizerId', 'title', 'gameTitle', 'prizeCoins', 'entryCoins', 'maxTeams', 'tournamentState', 'registeredIds', 'scheduleLabel', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['organizerId', 'title', 'gameTitle', 'prizeCoins', 'entryCoins', 'maxTeams', 'tournamentState', 'registeredIds', 'scheduleLabel', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['organizerId', 'title', 'gameTitle', 'prizeCoins', 'entryCoins', 'maxTeams', 'tournamentState', 'registeredIds', 'scheduleLabel', 'startsAtMillis', 'formatLabel', 'rulesSummary', 'createdAt', 'updatedAt']) &&
                        isValidTournament(incoming());
 
       allow update: if isSignedIn() &&
@@ -556,11 +600,35 @@ service cloud.firestore {
                        incoming().organizerId == existing().organizerId &&
                        incoming().createdAt == existing().createdAt && (
                          (existing().organizerId == request.auth.uid &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'tournamentState', 'registeredIds', 'scheduleLabel', 'updatedAt'])) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'tournamentState', 'registeredIds', 'scheduleLabel', 'startsAtMillis', 'formatLabel', 'rulesSummary', 'updatedAt'])) ||
                          (incoming().diff(existing()).affectedKeys().hasOnly(['registeredIds', 'updatedAt']))
                        );
 
       allow delete: if isSignedIn() && isValidId(tournamentId) && existing().organizerId == request.auth.uid;
+
+      match /registrations/{regUserId} {
+        allow get: if isSignedIn() && isValidId(regUserId);
+        allow list: if isSignedIn() && existing().tournamentId == tournamentId;
+
+        allow create: if isOwner(regUserId) &&
+                         isValidId(regUserId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().tournamentId == tournamentId &&
+                         incoming().keys().hasAll(['tournamentId', 'userId', 'playerName', 'teamName', 'gamerTag', 'division', 'agreedRules', 'entryPaidCoins', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['tournamentId', 'userId', 'playerName', 'teamName', 'gamerTag', 'division', 'agreedRules', 'entryPaidCoins', 'createdAt', 'updatedAt']) &&
+                         isValidTournamentRegistration(incoming()) &&
+                         exists(/databases/$(database)/documents/tournaments/$(tournamentId));
+
+        allow update: if isOwner(regUserId) &&
+                         isValidId(regUserId) &&
+                         isValidTournamentRegistration(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().tournamentId == existing().tournamentId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['teamName', 'gamerTag', 'division', 'updatedAt']);
+
+        allow delete: if isOwner(regUserId) && isValidId(regUserId);
+      }
     }
 
     // --- 9. Friends & Friend Requests ---
@@ -588,6 +656,36 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(requestId) && request.auth.uid in existing().participantIds;
+    }
+
+    // --- 9b. Multiplayer Party Invites ---
+    match /party_invites/{inviteId} {
+      allow get: if isSignedIn() && isValidId(inviteId) && request.auth.uid in existing().participantIds;
+      allow list: if isSignedIn() && request.auth.uid in existing().participantIds;
+
+      allow create: if isSignedIn() &&
+                       isValidId(inviteId) &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().receiverId != request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       request.auth.uid in incoming().participantIds &&
+                       incoming().keys().hasAll(['partyId', 'partyName', 'gameTitle', 'senderId', 'senderName', 'senderAvatar', 'receiverId', 'receiverName', 'participantIds', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['partyId', 'partyName', 'gameTitle', 'senderId', 'senderName', 'senderAvatar', 'receiverId', 'receiverName', 'participantIds', 'status', 'createdAt', 'updatedAt']) &&
+                       isValidPartyInvite(incoming()) &&
+                       exists(/databases/$(database)/documents/parties/$(incoming().partyId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(inviteId) &&
+                       isValidPartyInvite(incoming()) &&
+                       existing().status == 'pending' &&
+                       request.auth.uid == existing().receiverId &&
+                       incoming().partyId == existing().partyId &&
+                       incoming().senderId == existing().senderId &&
+                       incoming().receiverId == existing().receiverId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(inviteId) && request.auth.uid in existing().participantIds;
     }
 
     // --- 10. Direct Messages & Group Chats ---

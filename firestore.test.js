@@ -80,7 +80,7 @@ test("Private user doc & PII isolation: owner succeeds, cross-user fails", async
     })
   );
 
-  // Partial update on daily claim
+  // Partial update on daily claim (first claim succeeds)
   await assertSucceeds(
     aliceDb.collection("users").doc(ALICE_UID).update({
       coins: 650,
@@ -88,6 +88,50 @@ test("Private user doc & PII isolation: owner succeeds, cross-user fails", async
       lastClaimDayIndex: 2,
       lastDailyClaimAt: pastDate(1000),
       updatedAt: pastDate(1000),
+    })
+  );
+
+  // Second claim within 24 hours rejected
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      coins: 800,
+      streakDays: 3,
+      lastClaimDayIndex: 3,
+      lastDailyClaimAt: pastDate(500),
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Non-reward settings update still allowed within 24h
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      privacyShowOnline: false,
+      updatedAt: pastDate(400),
+    })
+  );
+
+  // Claim after 24+ hours succeeds when existing lastDailyClaimAt is >24h old
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    await adminDb.collection("users").doc(ALICE_UID).update({
+      lastDailyClaimAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    });
+  });
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      coins: 870,
+      streakDays: 3,
+      lastClaimDayIndex: 3,
+      lastDailyClaimAt: pastDate(200),
+      updatedAt: pastDate(200),
+    })
+  );
+
+  // Backdating lastDailyClaimAt rejected
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      lastDailyClaimAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+      updatedAt: pastDate(100),
     })
   );
 
@@ -403,3 +447,206 @@ test("Live Streams, Worlds (LAN), Parties, Communities, Tournaments, Chat & Frie
   await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("gallery").get());
   await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("gallery").get());
 });
+
+test("Party Invites & Friend Removal: create, participant isolation, accept/join party, and unfriend delete", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const ts = pastDate(5000);
+
+  // Alice creates a party
+  await assertSucceeds(
+    aliceDb.collection("parties").doc("party_1").set({
+      leaderId: ALICE_UID,
+      leaderName: "Alice",
+      partyName: "Ranked Squad",
+      gameTitle: "Minecraft",
+      maxSlots: 4,
+      memberIds: [ALICE_UID],
+      mutedMemberIds: [],
+      voiceActive: true,
+      queueState: "idle",
+      partyStatus: "active",
+      matchedLobbyCode: "",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Cannot invite without existing party
+  await assertFails(
+    aliceDb.collection("party_invites").doc("inv_bad").set({
+      partyId: "nonexistent_party",
+      partyName: "Ghost",
+      gameTitle: "Minecraft",
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderAvatar: "cyber_visor",
+      receiverId: BOB_UID,
+      receiverName: "Bob",
+      participantIds: [ALICE_UID, BOB_UID],
+      status: "pending",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Valid party invite from Alice to Bob succeeds
+  await assertSucceeds(
+    aliceDb.collection("party_invites").doc("inv_1").set({
+      partyId: "party_1",
+      partyName: "Ranked Squad",
+      gameTitle: "Minecraft",
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderAvatar: "cyber_visor",
+      receiverId: BOB_UID,
+      receiverName: "Bob",
+      participantIds: [ALICE_UID, BOB_UID],
+      status: "pending",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Participant-scoped list queries succeed; unfiltered list or Charlie read fail
+  await assertSucceeds(bobDb.collection("party_invites").where("participantIds", "array-contains", BOB_UID).get());
+  await assertFails(charlieDb.collection("party_invites").doc("inv_1").get());
+  await assertFails(charlieDb.collection("party_invites").get());
+
+  // Sender cannot forge receiver acceptance
+  await assertFails(
+    aliceDb.collection("party_invites").doc("inv_1").update({
+      status: "accepted",
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Receiver (Bob) accepts invite and joins party
+  await assertSucceeds(
+    bobDb.collection("party_invites").doc("inv_1").update({
+      status: "accepted",
+      updatedAt: pastDate(500),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("parties").doc("party_1").update({
+      memberIds: [ALICE_UID, BOB_UID],
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Terminal state locking: cannot update after accepted
+  await assertFails(
+    bobDb.collection("party_invites").doc("inv_1").update({
+      status: "declined",
+      updatedAt: pastDate(200),
+    })
+  );
+
+  // Either participant can delete an invite or friend_request (cancel / unfriend)
+  await assertSucceeds(aliceDb.collection("party_invites").doc("inv_1").delete());
+});
+
+test("Tournaments & Registrations: countdown metadata, team signup, isolation, and withdrawal", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const ts = pastDate(5000);
+  const futureStart = Date.now() + 3600000;
+
+  // Alice hosts an upcoming tournament with countdown timestamp
+  await assertSucceeds(
+    aliceDb.collection("tournaments").doc("tour_1").set({
+      organizerId: ALICE_UID,
+      title: "Neon Skywars Cup",
+      gameTitle: "Minecraft",
+      prizeCoins: 1500,
+      entryCoins: 50,
+      maxTeams: 16,
+      tournamentState: "upcoming",
+      registeredIds: [ALICE_UID],
+      scheduleLabel: "In 1 hour",
+      startsAtMillis: futureStart,
+      formatLabel: "Squad 4v4",
+      rulesSummary: "No hacks; check in 15 min early.",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Bob registers his team into the subcollection and adds his UID to registeredIds
+  await assertSucceeds(
+    bobDb.collection("tournaments").doc("tour_1").collection("registrations").doc(BOB_UID).set({
+      tournamentId: "tour_1",
+      userId: BOB_UID,
+      playerName: "Bob",
+      teamName: "Volt Strikers",
+      gamerTag: "@bob_arcade",
+      division: "Squad",
+      agreedRules: true,
+      entryPaidCoins: 50,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("tournaments").doc("tour_1").update({
+      registeredIds: [ALICE_UID, BOB_UID],
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Registration requires agreedRules == true and valid owner doc ID
+  await assertFails(
+    charlieDb.collection("tournaments").doc("tour_1").collection("registrations").doc(BOB_UID).set({
+      tournamentId: "tour_1",
+      userId: CHARLIE_UID,
+      playerName: "Charlie",
+      teamName: "Spoof",
+      gamerTag: "@charlie",
+      division: "Solo",
+      agreedRules: true,
+      entryPaidCoins: 50,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertFails(
+    charlieDb.collection("tournaments").doc("tour_1").collection("registrations").doc(CHARLIE_UID).set({
+      tournamentId: "tour_1",
+      userId: CHARLIE_UID,
+      playerName: "Charlie",
+      teamName: "Rule Skip",
+      gamerTag: "@charlie",
+      division: "Solo",
+      agreedRules: false,
+      entryPaidCoins: 50,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Signed-in users can query registrations scoped by tournamentId; Charlie cannot delete Bob's entry
+  await assertSucceeds(
+    charlieDb.collection("tournaments").doc("tour_1").collection("registrations")
+      .where("tournamentId", "==", "tour_1")
+      .get()
+  );
+  await assertFails(
+    charlieDb.collection("tournaments").doc("tour_1").collection("registrations").doc(BOB_UID).delete()
+  );
+
+  // Bob can update teamName or withdraw his own registration
+  await assertSucceeds(
+    bobDb.collection("tournaments").doc("tour_1").collection("registrations").doc(BOB_UID).update({
+      teamName: "Volt Legends",
+      updatedAt: pastDate(200),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("tournaments").doc("tour_1").collection("registrations").doc(BOB_UID).delete()
+  );
+});
+
+

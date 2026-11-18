@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,9 +33,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.R
+import com.example.data.ArcadeCatalog
+import com.example.data.LevelProgressionTracker
+import com.example.data.LevelTier
 import com.example.data.PostComment
 import com.example.data.SocialPost
+import com.example.data.UserPrivate
+import com.example.data.formattedLastClaimed
+import com.example.data.levelProgress
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 
 private val LiveRingBrush = Brush.linearGradient(listOf(CoralLive, GoldCoin, CyanNeon))
 private val DefaultRingBrush = Brush.linearGradient(listOf(CyanNeon.copy(alpha = 0.7f), VioletArcade.copy(alpha = 0.7f)))
@@ -503,3 +511,488 @@ fun CommentsBottomSheet(
         }
     }
 }
+
+@Composable
+fun DailyRewardSectionCard(
+    userPrivate: UserPrivate?,
+    isClaiming: Boolean,
+    onClaim: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val claimedIdx = (userPrivate?.lastClaimDayIndex ?: 0L).toInt()
+    val nextDay = (claimedIdx % 7) + 1
+    val nextReward = ArcadeCatalog.dailyRewards.first { it.day == nextDay }
+    val streakDays = userPrivate?.streakDays ?: 0L
+    val lastClaimMs = userPrivate?.lastDailyClaimAt?.toDate()?.time
+
+    var nowMillis by remember(lastClaimMs) { mutableLongStateOf(System.currentTimeMillis()) }
+    val status = remember(lastClaimMs, nowMillis) {
+        ArcadeCatalog.dailyRewardStatus(lastClaimMs, nowMillis)
+    }
+
+    LaunchedEffect(lastClaimMs, status.canClaim) {
+        if (!status.canClaim) {
+            while (true) {
+                delay(1000L)
+                val updated = System.currentTimeMillis()
+                nowMillis = updated
+                if (ArcadeCatalog.dailyRewardStatus(lastClaimMs, updated).canClaim) break
+            }
+        }
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("daily_reward_card"),
+        shape = RoundedCornerShape(20.dp),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, GoldCoin.copy(alpha = if (status.canClaim) 0.7f else 0.35f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CardGiftcard,
+                            contentDescription = "Daily Bonus",
+                            tint = GoldCoin,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Daily Bonus • 24h Reward",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = GoldCoin,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        text = "Collect Gift Coins & XP once every 24 hours",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = GoldContainer,
+                    border = BorderStroke(1.dp, GoldCoin.copy(alpha = 0.5f)),
+                    modifier = Modifier.testTag("daily_reward_streak")
+                ) {
+                    Text(
+                        text = "${streakDays}d Streak",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = GoldCoin,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = ObsidianSurfaceElevated,
+                border = BorderStroke(
+                    1.dp,
+                    if (status.canClaim) VoltGreen.copy(alpha = 0.45f) else CyanNeon.copy(alpha = 0.35f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Last claimed: ${userPrivate?.lastDailyClaimAt.formattedLastClaimed()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            modifier = Modifier.testTag("daily_reward_last_claimed")
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (status.canClaim) Icons.Rounded.CheckCircle else Icons.Rounded.Schedule,
+                            contentDescription = null,
+                            tint = if (status.canClaim) VoltGreen else CyanNeon,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = if (status.canClaim) {
+                                "24h cooldown complete — Bonus ready!"
+                            } else {
+                                "Next bonus in ${status.formattedRemaining}"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (status.canClaim) VoltGreen else CyanNeon,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.testTag("daily_reward_countdown")
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { status.progressFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                            .clip(RoundedCornerShape(50)),
+                        color = if (status.canClaim) VoltGreen else GoldCoin,
+                        trackColor = ObsidianBg
+                    )
+                }
+            }
+
+            Button(
+                onClick = onClaim,
+                enabled = status.canClaim && !isClaiming,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = GoldCoin,
+                    contentColor = ObsidianBg,
+                    disabledContainerColor = ObsidianSurfaceElevated,
+                    disabledContentColor = TextSecondary
+                ),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("claim_daily_coins_button")
+            ) {
+                if (isClaiming) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = ObsidianBg
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Claiming Day $nextDay...", fontWeight = FontWeight.Bold)
+                } else if (status.canClaim) {
+                    Icon(
+                        imageVector = Icons.Rounded.CardGiftcard,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Claim Day $nextDay (+${nextReward.coins} Coins)",
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Come back in ${status.formattedShortRemaining}",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(ArcadeCatalog.dailyRewards, key = { it.day }) { day ->
+                    val isDone = day.day <= claimedIdx
+                    val isCurrent = day.day == nextDay
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = when {
+                            isCurrent && status.canClaim -> GoldContainer
+                            isCurrent -> CyanContainer
+                            isDone -> VoltGreenContainer
+                            else -> ObsidianSurfaceElevated
+                        },
+                        border = if (isCurrent) {
+                            BorderStroke(1.5.dp, if (status.canClaim) GoldCoin else CyanNeon)
+                        } else {
+                            null
+                        }
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Day ${day.day}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                            Text(
+                                text = "+${day.coins}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = GoldCoin
+                            )
+                            Text(
+                                text = "+${day.xp} XP",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = VoltGreen
+                            )
+                            if (day.buffLabel != null) {
+                                Text(
+                                    text = "BUFF",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = CyanNeon
+                                )
+                            } else if (isDone && !isCurrent) {
+                                Text(
+                                    text = "CLAIMED",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VoltGreen
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyRewardStatusDialog(
+    userPrivate: UserPrivate?,
+    isClaiming: Boolean,
+    onClaim: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ObsidianBg,
+        title = { Text("24-Hour Daily Bonus", color = TextPrimary) },
+        text = {
+            DailyRewardSectionCard(
+                userPrivate = userPrivate,
+                isClaiming = isClaiming,
+                onClaim = onClaim
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = CyanNeon)
+            }
+        }
+    )
+}
+
+@Composable
+fun LevelProgressionCard(
+    userPrivate: UserPrivate?,
+    modifier: Modifier = Modifier
+) {
+    val progress = remember(userPrivate) { userPrivate.levelProgress() }
+    val hasTurboXp = userPrivate?.activeBuffs?.contains("XP_BOOST_20") == true
+    val boostLabel = if (hasTurboXp) "+20% XP Buff" else "+10% XP Boost"
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("level_progression_card"),
+        shape = RoundedCornerShape(20.dp),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, VoltGreen.copy(alpha = 0.45f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.EmojiEvents,
+                            contentDescription = "Level Rank",
+                            tint = VoltGreen,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "LV ${progress.level} • ${progress.tier.title}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.testTag("level_progression_title")
+                        )
+                    }
+                    Text(
+                        text = progress.tier.perkSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = VoltGreenContainer,
+                    border = BorderStroke(1.dp, VoltGreen.copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        text = boostLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VoltGreen,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = ObsidianSurfaceElevated,
+                border = BorderStroke(1.dp, ObsidianOutline)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${progress.xpIntoCurrentLevel} / ${progress.xpRequiredForLevel} XP",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = VoltGreen,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.testTag("level_progression_xp")
+                        )
+                        Text(
+                            text = "${progress.totalXp} Total XP",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { progress.progressFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(9.dp)
+                            .clip(RoundedCornerShape(50)),
+                        color = VoltGreen,
+                        trackColor = ObsidianBg
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (progress.isMaxLevel) {
+                                "Max Arcade Level Reached"
+                            } else {
+                                "${progress.xpRemainingToNextLevel} XP to Level ${progress.level + 1}"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CyanNeon
+                        )
+                        if (progress.nextTier != null) {
+                            Text(
+                                text = "Next: ${progress.nextTier.title} (LV ${progress.nextTier.minLevel})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = GoldCoin
+                            )
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = "Rank Tiers",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(LevelTier.entries, key = { it.minLevel }) { tier ->
+                    val unlocked = progress.level >= tier.minLevel
+                    val isCurrent = progress.tier == tier
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = when {
+                            isCurrent -> VoltGreenContainer
+                            unlocked -> CyanContainer.copy(alpha = 0.65f)
+                            else -> ObsidianSurfaceElevated
+                        },
+                        border = if (isCurrent) BorderStroke(1.5.dp, VoltGreen) else null
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "LV ${tier.minLevel}+",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (unlocked) VoltGreen else TextMuted,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = tier.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (unlocked) TextPrimary else TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = "Ways to Earn XP",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(LevelProgressionTracker.xpSources, key = { it.id }) { source ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = ObsidianSurfaceElevated,
+                        border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.25f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = source.actionLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = source.xpLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = VoltGreen,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
