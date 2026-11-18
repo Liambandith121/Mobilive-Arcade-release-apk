@@ -86,20 +86,29 @@ jobs:
         run: |
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            RELEASE_TAG="${GITHUB_REF_NAME}"
+            BASE_TAG="${GITHUB_REF_NAME}"
             PRERELEASE_FLAG=""
-            RELEASE_TITLE="Mobilive Arcade ${RELEASE_TAG}"
+            RELEASE_TITLE="Mobilive Arcade ${BASE_TAG}"
           else
-            RELEASE_TAG="debug-build-${GITHUB_RUN_NUMBER}"
+            BASE_TAG="debug-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
             PRERELEASE_FLAG="--prerelease"
-            RELEASE_TITLE="Mobilive Arcade Debug Build #${GITHUB_RUN_NUMBER}"
+            RELEASE_TITLE="Mobilive Arcade Debug Build #${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           fi
 
+          RELEASE_TAG="${BASE_TAG}"
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release upload "${RELEASE_TAG}" "${APK_PATH}" --clobber
-          else
-            gh release create "${RELEASE_TAG}" "${APK_PATH}" \
-              --title "${RELEASE_TITLE}" \
-              --generate-notes \
-              ${PRERELEASE_FLAG}
+            RELEASE_TAG="${BASE_TAG}-r${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-$(date +%s)"
+            RELEASE_TITLE="${RELEASE_TITLE} (${RELEASE_TAG})"
           fi
+
+          # Create as draft first, attach the APK, then publish so GitHub Immutable Releases
+          # never fails trying to modify or delete assets on a published release.
+          gh release create "${RELEASE_TAG}" \
+            --draft \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_TITLE}" \
+            --generate-notes \
+            ${PRERELEASE_FLAG}
+
+          gh release upload "${RELEASE_TAG}" "${APK_PATH}"
+          gh release edit "${RELEASE_TAG}" --draft=false
